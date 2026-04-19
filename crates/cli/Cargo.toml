@@ -1,0 +1,30 @@
+[package]
+name = "sms-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "sms"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+csv = { workspace = true }
+rusqlite = { workspace = true }
+ctrlc = { workspace = true }
+
+sms-types = { path = "../types" }
+sms-errors = { path = "../errors" }
+sms-config = { path = "../config" }
+sms-ingest = { path = "../ingest" }
+sms-db = { path = "../db" }
+sms-datagen = { path = "../datagen" }
+sms-search = { path = "../search" }
+sms-ml = { path = "../ml", features = ["onnx"] }
+sms-media-process = { path = "../media_process" }

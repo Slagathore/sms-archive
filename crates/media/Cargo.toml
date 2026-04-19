@@ -1,0 +1,25 @@
+[package]
+name = "sms-media"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+image = { workspace = true }
+img_hash = { workspace = true }
+blake3 = { workspace = true }
+tracing = { workspace = true }
+crossbeam-channel = { workspace = true }
+libheif-rs = { workspace = true, optional = true }
+ffmpeg-next = { workspace = true, optional = true }
+tempfile = { workspace = true }
+
+sms-types = { path = "../types" }
+sms-errors = { path = "../errors" }
+
+[features]
+default = []
+heic = ["libheif-rs"]
+ffmpeg = ["ffmpeg-next"]
+
+[dev-dependencies]

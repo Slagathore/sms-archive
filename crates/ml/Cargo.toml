@@ -1,0 +1,22 @@
+[package]
+name = "sms-ml"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tracing = { workspace = true }
+sha2 = { workspace = true }
+blake3 = { workspace = true }
+ndarray = { workspace = true, optional = true }
+tokenizers = { workspace = true, optional = true }
+
+sms-types = { path = "../types" }
+sms-errors = { path = "../errors" }
+
+# Optional ONNX Runtime
+ort = { workspace = true, optional = true, features = ["ndarray"] }
+
+[features]
+default = []
+onnx = ["ort", "ndarray", "tokenizers"]

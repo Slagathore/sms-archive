@@ -1,0 +1,19 @@
+[package]
+name = "sms-assistant"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+ureq = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+rusqlite = { workspace = true }
+
+sms-db = { path = "../db" }
+sms-config = { path = "../config" }
+sms-types = { path = "../types" }
+sms-search = { path = "../search" }
+uuid = { workspace = true }

@@ -1,0 +1,72 @@
+# Build outputs
+/target
+/dist
+/build
+
+# Node modules
+node_modules/
+
+# Environment files
+.env
+.env.local
+
+# Python
+*.pyc
+__pycache__/
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+nul
+
+# Logs
+*.log
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+sidecar.log
+
+# Rotated / archived log files
+logs/
+
+# Large test data files - keep small samples only
+*.xml.large
+src-tauri/*.xml
+!src-tauri/sample-small.xml
+
+# Raw SMS backup XML files (source data, not part of codebase)
+docs/*.xml
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# User-specific UI state - contains personal paths, contacts, and runtime preferences.
+# Copy config/app_ui_settings.example.json -> config/app_ui_settings.json to get started.
+config/app_ui_settings.json
+
+# Generated files
+gen/
+
+# VS Code snapshots (local editor state)
+.snapshots/
+
+# ML model files - large binary artifacts (ONNX, weights, numpy arrays)
+# Regenerate with: python scripts/setup_ml_models.py
+ml/*.onnx
+ml/*.npz
+ml/CLIP1/
+ml/CLIP2/
+ml/CLIP3/
+ml/clip_autokeras_binary_nsfw/

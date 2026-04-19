@@ -1,0 +1,156 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/types",
+    "crates/errors",
+    "crates/config",
+    "crates/ingest",
+    "crates/db",
+    "crates/search",
+    "crates/media",
+    "crates/ml",
+    "crates/clip",
+    "crates/media_process",
+    "crates/perf",
+    "crates/datagen",
+    "crates/cli",
+    "crates/app",
+    "crates/assistant",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["Cole <cole@example.com>"]
+repository = "https://example.com/sms-archive"
+
+[workspace.dependencies]
+# Core async runtime
+tokio = { version = "1.35", features = ["full"] }
+tokio-util = "0.7"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Logging & tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled", "backup", "blob", "chrono"] }
+
+# XML parsing
+quick-xml = { version = "0.31", features = ["serialize"] }
+
+# String searching (SIMD)
+memchr = "2.7"
+
+# Concurrency
+crossbeam-channel = "0.5"
+rayon = "1.8"
+
+# Memory mapping
+memmap2 = "0.9"
+
+# Unicode normalization
+unicode-normalization = "0.1"
+
+# CLI parsing
+clap = { version = "4.4", features = ["derive", "cargo"] }
+
+# Progress bars
+indicatif = "0.17"
+
+# System info
+sysinfo = "0.30"
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID generation
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# Hashing
+blake3 = "=1.5.0"
+sha2 = "0.10"
+
+# Base64
+base64 = "0.21"
+
+# Arrays
+ndarray = "0.17.2"
+
+# Tokenizers (disable C++ fast path to avoid MSVC CRT conflicts)
+tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
+
+# Image processing
+image = "0.24"
+img_hash = "3.2"
+libheif-rs = "1.0"
+ffmpeg-next = "7.0"
+nom-exif = "2.6"
+
+# ONNX Runtime
+ort = { version = "2.0.0-rc.2", features = ["cuda"] }
+
+# GUI framework
+egui = "0.25"
+eframe = { version = "0.25" }
+
+# LRU cache
+lru = "0.12"
+
+# Native file dialogs
+rfd = "0.14"
+
+# HTTP client (blocking, for Ollama)
+ureq = { version = "2.10", features = ["json"] }
+
+# Random generation (for datagen)
+rand = "0.8"
+
+# File system utilities
+fs2 = "0.4"
+walkdir = "2.4"
+
+# Metrics
+metrics = "0.22"
+metrics-exporter-prometheus = { version = "0.13" }
+
+# Test utilities
+tempfile = "3.10"
+
+# CSV output
+csv = "1.3"
+
+# Windows bindings (needed by eframe on Windows)
+winapi = { version = "0.3", features = ["winuser"] }
+
+# Ctrl-C handler
+ctrlc = "3.4"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.bench]
+inherits = "release"
+strip = false
+debug = true
+
+[profile.dev.package."*"]
+opt-level = 2

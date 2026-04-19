@@ -1,0 +1,26 @@
+[env]
+# vcpkg FFmpeg paths
+VCPKG_ROOT = "C:\\vcpkg"
+FFMPEG_DIR = "C:\\vcpkg\\installed\\x64-windows"
+FFMPEG_STATIC = "1"
+# Tell bindgen where to find headers - use forward slashes for clang
+BINDGEN_EXTRA_CLANG_ARGS = "-I C:/vcpkg/installed/x64-windows/include"
+
+[build]
+# Use faster linker on Linux
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+# Windows optimizations
+[target.x86_64-pc-windows-msvc]
+# NOTE: Static CRT can conflict with bundled native libs (onnx/ffmpeg).
+# Enable only if you ship fully static dependencies.
+# rustflags = ["-C", "target-feature=+crt-static"]
+rustflags = ["-L", "C:\\vcpkg\\installed\\x64-windows\\lib"]
+
+[alias]
+# Convenience aliases
+quick = "build --release"
+bench-all = "bench --workspace"
+lint = "clippy --workspace -- -D warnings"

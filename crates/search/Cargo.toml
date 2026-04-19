@@ -1,0 +1,19 @@
+[package]
+name = "sms-search"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rusqlite = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+tantivy = { version = "0.22", optional = true }
+
+sms-types = { path = "../types" }
+sms-errors = { path = "../errors" }
+sms-db = { path = "../db" }
+sms-config = { path = "../config" }
+
+[features]
+tantivy = ["dep:tantivy"]

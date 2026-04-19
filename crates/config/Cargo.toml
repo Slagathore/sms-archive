@@ -1,0 +1,16 @@
+[package]
+name = "sms-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sysinfo = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+fs2 = { workspace = true }
+
+sms-errors = { path = "../errors" }

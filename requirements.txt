@@ -1,0 +1,30 @@
+# SMS Archive - ML Model Setup Dependencies
+# Used by: scripts/setup_ml_models.py
+#
+# Install:
+#   pip install -r requirements.txt
+#
+# For GPU inference (recommended), install the CUDA-enabled ONNX Runtime instead:
+#   pip install onnxruntime-gpu>=1.17
+# and ensure CUDA 11.x/12.x is installed on your system.
+
+# PyTorch - for exporting models to ONNX
+# Install the CUDA build from https://pytorch.org/get-started/locally/ for GPU support.
+# Default CPU build:
+torch>=2.1
+
+# CLIP model (OpenAI ViT-L/14) - used for image and text embeddings
+open-clip-torch>=2.24
+
+# ONNX - model format and checker
+onnx>=1.15
+
+# ONNX Runtime - CPU inference (swap for onnxruntime-gpu for GPU support)
+onnxruntime>=1.17
+
+# TensorFlow - only needed for one-time NSFW classifier export
+# Can be omitted after ml/nsfw_classifier.onnx has been generated.
+tensorflow>=2.13
+
+# NumPy - array utilities for TF weight extraction
+numpy>=1.24

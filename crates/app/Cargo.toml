@@ -1,0 +1,46 @@
+[package]
+name = "sms-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "sms-archive"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { workspace = true }
+egui = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+winapi = { workspace = true }
+rusqlite = { workspace = true }
+uuid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+lru = { workspace = true }
+image = { workspace = true }
+blake3 = { workspace = true }
+rfd = { workspace = true }
+ureq = { workspace = true }
+chrono = { workspace = true }
+nom-exif = { workspace = true }
+csv = { workspace = true }
+vcard = "0.3"
+base64 = { workspace = true }
+quick-xml = { workspace = true }
+walkdir = { workspace = true }
+
+sms-types = { path = "../types" }
+sms-errors = { path = "../errors" }
+sms-config = { path = "../config" }
+sms-db = { path = "../db" }
+sms-search = { path = "../search" }
+sms-ingest = { path = "../ingest" }
+sms-media = { path = "../media" } # features = ["ffmpeg"] - temporarily disabled due to bindgen/vcpkg issues
+sms-ml = { path = "../ml", features = ["onnx"] }
+sms-assistant = { path = "../assistant" }
+sms-media-process = { path = "../media_process" }
+sms-clip = { path = "../clip" }

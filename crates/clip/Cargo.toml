@@ -1,0 +1,21 @@
+[package]
+name = "sms-clip"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+image = { workspace = true }
+ndarray = { workspace = true }
+ndarray-npy = "0.10.0"
+ort = { workspace = true, features = ["ndarray"] }
+safetensors = "0.4"
+bytemuck = "1.16"
+tracing = { workspace = true }
+serde_json = { workspace = true }
+
+sms-errors = { path = "../errors" }
+
+[features]
+default = ["onnx"]
+onnx = []

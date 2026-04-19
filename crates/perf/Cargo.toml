@@ -1,0 +1,22 @@
+[package]
+name = "sms-perf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+sms-ingest = { path = "../ingest" }
+sms-db = { path = "../db" }
+
+[dev-dependencies]
+criterion = "0.5"
+tempfile = { workspace = true }
+
+[[bench]]
+name = "boundary_detection"
+harness = false
+
+[[bench]]
+name = "ingest_throughput"
+harness = false

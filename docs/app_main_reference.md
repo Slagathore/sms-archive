@@ -1,0 +1,266 @@
+# Mission statement
+
+This document explains the main SMS Archive application module, its responsibilities, and how its core types and functions cooperate to deliver import, search, media, assistant, timeline, and mapping features.
+
+## Module overview
+
+The main application module (crates/app/src/main.rs) defines the SMS Archive desktop UI, coordinates database access, long-running background tasks, and integrates OCR, vision, embeddings, contacts, and map rendering.
+
+## Modules and classes used by this module
+
+- eframe/egui: UI framework and widgets.
+- sms_db::Database, sms_db::BatchWriter, sms_db::ModelMeta: database access and batch writes.
+- sms_ingest: XML ingest pipeline and progress tracking.
+- sms_media: media utilities (thumbnails, attachments).
+- sms_media_process: CLIP media processing pipeline for embeddings and NSFW labels.
+- sms_clip: CLIP helpers for CUDA probing and input shape inference.
+- sms_search::{Fts5Backend, semantic_search}: text and semantic search.
+- sms_assistant::Assistant: chat assistant orchestration.
+- quick_xml: XML parsing for contacts import.
+- nom_exif: EXIF GPS extraction.
+- ureq: HTTP client for Ollama endpoints.
+- chrono: time parsing/formatting.
+
+## Primary classes and structs (with variables/fields)
+
+- SmsArchiveApp: central application state.
+  - active_tab: active UI tab.
+  - db_path: current database path.
+  - db_folder: selected database folder.
+  - media_root: optional media root override.
+  - new_db_name: file name for new DB creation.
+  - status: global status line.
+  - message_count: messages count in DB.
+  - search_query: search text input.
+  - search_filters: filter settings for search.
+  - search_backend: FTS backend handle.
+  - results: search results list.
+  - selected: selected message.
+  - selected_attachments: attachments for the selected message.
+  - page_size: search page size.
+  - page_offset: search page offset.
+  - page_jump_input: search page jump input.
+  - search_in_flight: search running flag.
+  - pending_results: async search results buffer.
+  - search_max_results: search cap input.
+  - search_unlimited: unlimited search toggle.
+  - context_window_size: thread window size input.
+  - semantic_query: semantic query input.
+  - semantic_hits: semantic search results.
+  - semantic_status: semantic status text.
+  - semantic_in_flight: semantic search running flag.
+  - pending_semantic: async semantic results buffer.
+  - semantic_limit: semantic limit input.
+  - model_stats: model stats list.
+  - model_stats_total: total messages count for stats.
+  - model_stats_status: status text for model stats.
+  - model_stats_in_flight: model stats running flag.
+  - pending_model_stats: async model stats buffer.
+  - selected_model_id: model selected for actions.
+  - model_action_in_flight: model action running flag.
+  - pending_model_action: async model action buffer.
+  - embed_generation: embedding run counter.
+  - import_input: XML input path.
+  - import_status: import status text.
+  - import_job: current import job.
+  - checkpoint_info: resume checkpoint info.
+  - resume_from_checkpoint: resume toggle.
+  - checkpoint_db_path: DB path for checkpoint.
+  - import_last_offset: last import offset.
+  - import_last_update: last import progress timestamp.
+  - import_stuck_threshold: stuck detection window.
+  - show_stuck_dialog: stuck dialog flag.
+  - import_pause_start: pause start time.
+  - import_total_paused: total paused duration.
+  - thumbnail_cache: in-memory thumbnail cache.
+  - last_frame: last frame time.
+  - frame_ms_ema: rolling frame time.
+  - show_perf: perf toggle.
+  - preview_cache: on-disk preview cache.
+  - preview_cache_db_path: cache DB path.
+  - embed_job: embeddings job handle.
+  - embed_status: embeddings status.
+  - embed_model_path: ONNX model path.
+  - embed_tokenizer_path: tokenizer path.
+  - embed_model_name: logical model name.
+  - embed_model_version: model version/tag.
+  - embed_dimensions: embedding dimensions.
+  - embed_batch_size: embedding batch size.
+  - embed_max_length: embedding max length.
+  - embed_normalize: L2 normalize toggle.
+  - embed_device: device preference for ONNX embeddings (CPU/GPU).
+  - use_ollama: Ollama embeddings toggle.
+  - ollama_base_url: Ollama base URL.
+  - ollama_models: cached Ollama models list.
+  - ollama_selected: selected Ollama model.
+  - ollama_pull_name: model name to pull.
+  - ollama_status: Ollama status text.
+  - ollama_log: Ollama log lines.
+  - ollama_in_flight: Ollama request running flag.
+  - ollama_models_source: URL used to fetch models.
+  - pending_ollama_models: async models buffer.
+  - pending_ollama_log: async log buffer.
+  - assistant_base_url: assistant base URL.
+  - assistant_model: assistant model name.
+  - assistant_model_status: assistant model check status.
+  - assistant_model_check_in_flight: assistant model check running flag.
+  - pending_assistant_model_check: async assistant model status.
+  - vision_base_url: vision base URL.
+  - vision_model: vision model name.
+  - vision_prompt: vision prompt.
+  - vision_model_status: vision model check status.
+  - vision_model_check_in_flight: vision model check running flag.
+  - pending_vision_model_check: async vision model status.
+  - tesseract_cmd: OCR command override.
+  - ocr_status: OCR status text.
+  - media_query: media filter query.
+  - media_results: media results list.
+  - media_nsfw_filter: NSFW filter mode for media list.
+  - media_embed_prompt: prompt used to caption media before embedding.
+  - media_embed_use_local: toggle to use local ONNX embeddings for media.
+  - media_nsfw_prompt: NSFW classification prompt.
+  - media_nsfw_threshold: NSFW score threshold.
+  - media_keyframe_max: max keyframes to extract for video embeddings.
+  - media_embed_status: media embedding status text.
+  - pending_media_embed_status: async media embedding status buffer.
+  - pending_media_embed_done: async media embedding completion IDs.
+  - ffmpeg_status: ffmpeg CLI check status.
+  - media_semantic_query: media semantic search input.
+  - media_semantic_hits: media semantic search results.
+  - media_semantic_status: media semantic search status text.
+  - media_semantic_in_flight: media semantic search running flag.
+  - media_semantic_use_clip: toggles CLIP-based media semantic search.
+  - media_semantic_limit: media semantic max hit count.
+  - pending_media_semantic: async media semantic results buffer.
+  - pending_fts_rebuild: async FTS rebuild status buffer.
+  - media_page_size: media page size.
+  - media_page_offset: media page offset.
+  - media_in_flight: media loading flag.
+  - pending_media: async media buffer.
+  - selected_media_ids: selected media ids for batch actions.
+  - media_batch_status: batch action status text.
+  - pending_ocr: async OCR updates.
+  - ocr_in_progress: OCR in-flight set.
+  - pending_vision: async vision updates.
+  - vision_in_progress: vision in-flight set.
+  - nsfw_in_progress: NSFW in-flight set.
+  - pending_nsfw: async NSFW updates.
+  - media_embed_in_progress: media embedding in-flight set.
+  - clip_model_path: CLIP image encoder ONNX path.
+  - clip_nsfw_weights_path: LAION NSFW probe weights path.
+  - clip_batch_size: CLIP batch size.
+  - clip_max_keyframes: CLIP keyframe extraction cap.
+  - clip_workers: CLIP keyframe worker count.
+  - clip_reprocess: CLIP reprocess toggle.
+  - clip_auto_on_import: auto-run CLIP after import toggle.
+  - clip_use_cuda: CUDA execution preference for CLIP.
+  - clip_status: CLIP processing status text.
+  - clip_cuda_status: CUDA probe status text for CLIP.
+  - clip_text_model_path: CLIP text encoder ONNX path for media semantic search.
+  - clip_text_tokenizer_path: CLIP text tokenizer JSON path for media semantic search.
+  - clip_job: CLIP processing job handle.
+  - pending_thread_results: async thread results.
+  - thread_results: thread messages list.
+  - thread_in_flight: thread loading flag.
+  - thread_anchor: anchor message for thread view.
+  - thread_scroll_to_anchor: scroll-to-anchor flag.
+  - thread_limit: thread view limit.
+  - contact_search: contacts search string.
+  - contacts: contacts list.
+  - contacts_in_flight: contacts loading flag.
+  - contact_status: contacts status text.
+  - pending_contacts: async contacts buffer.
+  - selected_contact_id: selected contact ID.
+  - contact_detail: selected contact detail.
+  - pending_contact_detail: async contact detail buffer.
+  - pending_contact_status: async contact status.
+  - contact_new_address: new contact address input.
+  - contact_merge_source: merge source ID.
+  - contact_merge_state: merge state.
+  - duplicate_groups: duplicate contact groups.
+  - duplicates_in_flight: duplicates search running flag.
+  - pending_duplicate_groups: async duplicates buffer.
+  - contact_name_cache: map of address to display name.
+  - self_addresses: user self addresses.
+  - self_address_input: self address input.
+  - timeline_stats: timeline stats snapshot.
+  - timeline_filters: timeline filter settings.
+  - timeline_chart_mode: chart mode.
+  - timeline_name_query: filter search for names.
+  - timeline_selected_addresses: selected addresses for timeline filters.
+  - timeline_in_flight: timeline refresh running flag.
+  - pending_timeline: async timeline stats.
+  - assistant: assistant chat engine.
+  - assistant_input: assistant input buffer.
+  - assistant_waiting: assistant response running flag.
+  - pending_assistant: async assistant results.
+  - map_filters: map filter settings.
+  - map_points: geotagged points.
+  - map_in_flight: map scan running flag.
+  - map_status: map status text.
+  - map_selected: selected map point index.
+  - pending_map: async map points buffer.
+  - map_tiles: cached map tiles.
+  - map_tiles_in_flight: map tiles loading set.
+  - pending_map_tiles: async tile buffer.
+  - log_filter: log viewer search filter.
+  - log_files: available log files list.
+  - log_selected: currently selected log file.
+  - log_lines: loaded log lines for display.
+  - log_status: log viewer status text.
+  - log_max_lines: maximum log lines to load.
+
+- MediaSemanticHit: media semantic search result (score + attachment + frame metadata + embedding stats).
+- EmbeddingStats: derived min/max/mean/norm stats for a single embedding vector.
+- MediaEmbedInspectRow: per-frame embedding stats used by the Media embedding inspector.
+- MediaAuditSnapshot: summary of filesystem vs DB attachment counts and missing media samples.
+  - fs_unlinked_total: filesystem files not referenced by DB attachments.
+  - fs_unlinked_samples: sample filesystem files missing from DB attachments.
+- MediaScoreEntry: heap score wrapper for media semantic ranking.
+- Keyframe: extracted frame reference used for vision/embedding tasks.
+- NsfwPayload: NSFW classification result for media.
+
+## Key functions (purpose summary)
+
+- send_assistant_message: sends a chat message and triggers tool-enabled assistant processing.
+- refresh_ollama_models_for: refreshes Ollama model list for a chosen base URL.
+- check_assistant_model / check_vision_model: validates the selected Ollama models and updates status.
+- check_tesseract: validates the OCR command and reports status.
+- run_ocr_tesseract: executes OCR via the Tesseract CLI.
+- run_vision_ollama: sends image and prompt to Ollama vision chat (annotates duration).
+- split_vision_analysis: separates duration annotations from vision text.
+- parse_import_inputs: splits import input into an ordered file queue.
+- refresh_log_files: loads log file list from the logs directory.
+- load_log_file: reads a selected log file into the log viewer buffer.
+- tag_gps_cache: caches GPS metadata into attachments for fast map rendering.
+- start_nsfw_for_attachment: runs NSFW classification for a media item.
+- start_media_embedding_for_attachment: generates keyframe captions and stores embeddings.
+- start_clip_processing: validates CLIP settings and starts the CLIP media processing job.
+- maybe_start_clip_after_import: auto-runs CLIP after import when enabled.
+- start_gps_tagging_after_import: runs GPS EXIF tagging after import when CLIP auto-run is disabled.
+- load_clip_settings / save_clip_settings: persists CLIP settings in app_settings.
+- autofill_clip_paths: populates CLIP model/NSFW paths from ml/ defaults if missing.
+- save_global_settings / load_global_settings: persist app-wide defaults in config/app_global_settings.json.
+- run_media_semantic_search: executes semantic search against media embeddings.
+- media_semantic_search: queries media_embeddings with cosine similarity.
+- decode_f32_vec / l2_norm / cosine_similarity: embedding math helpers for media search.
+- truncate_filename: shortens long media filenames for UI display.
+- vertical_label: renders timeline labels vertically for bar/line charts.
+- summarize_embedding: computes min/max/mean/norm/head for an embedding vector.
+- start_media_embedding_inspect: loads and displays stored media embeddings for an attachment.
+- run_media_audit: scans filesystem vs DB attachments to explain CLIP coverage gaps.
+- extract_keyframes / extract_video_keyframes_ffmpeg: keyframe extraction helpers.
+- classify_nsfw_frames: aggregates NSFW scores across frames.
+- is_self_message: classifies sent vs received using message direction (falls back to self addresses).
+- sync_timeline_address_filter: applies timeline multi-selects to query filters.
+- parse_address_list: parses multi-address filters for timeline queries.
+- load_map_points: scans attachments for GPS EXIF and builds map points.
+- resolve_media_path / resolve_media_path_with_root / resolve_media_path_candidates: resolve media paths with fallback handling.
+- open_file / open_file_location: open media file or its location in OS file explorer.
+- import_contacts_from_xml: extracts contact information from XML message exports.
+- extract_contact_names_from_xml: extracts contact_name entries from XML messages.
+- sync_contact_names_from_xml: applies XML-derived contact names into the contacts table.
+
+## Note
+
+This reference focuses on the primary app state and critical helper functions touched during recent updates. Additional helper functions and UI layout routines are defined in the same module and follow the same pattern: they transform UI input into database operations and background tasks, then render results in egui.

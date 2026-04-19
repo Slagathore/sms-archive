@@ -1,0 +1,21 @@
+[package]
+name = "sms-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rusqlite = { workspace = true }
+uuid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+
+sms-types = { path = "../types" }
+sms-errors = { path = "../errors" }
+sms-config = { path = "../config" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+uuid = { workspace = true }
