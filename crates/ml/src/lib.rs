@@ -114,7 +114,7 @@ impl EmbeddingService {
                         .map_err(|e| AppError::Media(e.to_string()))?;
 
                     let mut builder = Session::builder()
-                        .map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
+                        .map_err(|e| AppError::Media(e.to_string()))?;
                     if matches!(config.device, DevicePreference::Gpu) {
                         let provider =
                             ort::execution_providers::CUDAExecutionProvider::default().build();
@@ -133,9 +133,9 @@ impl EmbeddingService {
                             );
                             builder
                                 .with_optimization_level(GraphOptimizationLevel::Disable)
-                                .map_err(|e: ort::Error| AppError::Media(e.to_string()))?
+                                .map_err(|e| AppError::Media(e.to_string()))?
                                 .commit_from_file(path)
-                                .map_err(|e: ort::Error| AppError::Media(e.to_string()))?
+                                .map_err(|e| AppError::Media(e.to_string()))?
                         }
                     };
 
@@ -283,13 +283,13 @@ fn embed_onnx(
 
     let seq_len = ids.len().max(1);
     let input_ids = Tensor::<i64>::from_array(([1usize, seq_len], ids.into_boxed_slice()))
-        .map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
+        .map_err(|e| AppError::Media(e.to_string()))?;
     let attention_mask =
         Tensor::<i64>::from_array(([1usize, seq_len], mask.clone().into_boxed_slice()))
-            .map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
+            .map_err(|e| AppError::Media(e.to_string()))?;
     let token_type_ids =
         Tensor::<i64>::from_array(([1usize, seq_len], type_ids.into_boxed_slice()))
-            .map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
+            .map_err(|e| AppError::Media(e.to_string()))?;
 
     let outputs = match (
         backend.attention_mask_name.as_ref(),
@@ -302,20 +302,20 @@ fn embed_onnx(
                 mask_name.as_str() => attention_mask,
                 type_name.as_str() => token_type_ids
             })
-            .map_err(|e: ort::Error| AppError::Media(e.to_string()))?,
+            .map_err(|e| AppError::Media(e.to_string()))?,
         (Some(mask_name), None) => backend
             .session
             .run(ort::inputs! {
                 backend.input_ids_name.as_str() => input_ids,
                 mask_name.as_str() => attention_mask
             })
-            .map_err(|e: ort::Error| AppError::Media(e.to_string()))?,
+            .map_err(|e| AppError::Media(e.to_string()))?,
         (None, _) => backend
             .session
             .run(ort::inputs! {
                 backend.input_ids_name.as_str() => input_ids
             })
-            .map_err(|e: ort::Error| AppError::Media(e.to_string()))?,
+            .map_err(|e| AppError::Media(e.to_string()))?,
     };
 
     let output = if outputs.contains_key(backend.output_name.as_str()) {
@@ -325,7 +325,7 @@ fn embed_onnx(
     };
     let array = output
         .try_extract_array::<f32>()
-        .map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
+        .map_err(|e| AppError::Media(e.to_string()))?;
 
     let mut embedding = extract_embedding(array.into(), Some(&mask))?;
     if dims > 0 && embedding.len() != dims {

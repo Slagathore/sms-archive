@@ -99,7 +99,7 @@ fn tool_search_messages(db_path: &str, params: &Value) -> Result<String> {
     if results.is_empty() {
         let conn = backend.connection();
         let like = format!("%{}%", query);
-        let sql = "SELECT id, message_id, timestamp, address, body, body_searchable, message_type, message_direction, thread_id \
+        let sql = "SELECT id, message_id, timestamp, address, body, body_searchable, message_type, message_direction, thread_id, contact_name \
                FROM messages WHERE body LIKE ?1 OR body_searchable LIKE ?1 \
                ORDER BY timestamp DESC LIMIT ?2";
         // #todo: add optional direction filter to assistant fallback searches.
@@ -124,6 +124,7 @@ fn tool_search_messages(db_path: &str, params: &Value) -> Result<String> {
                     direction: sms_types::MessageDirection::from_i32(message_direction),
                     thread_id: row.get(8)?,
                     attachments: Vec::new(),
+                    contact_name: row.get(9)?,
                 })
             })?;
             for row in rows.flatten() {

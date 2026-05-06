@@ -16,6 +16,11 @@ pub struct Message {
     pub direction: MessageDirection,
     pub thread_id: Option<String>,
     pub attachments: Vec<AttachmentRef>,
+    /// Display name from the source XML's `contact_name` attribute (SMS Backup & Restore).
+    /// May be `None` for MMS rows or messages imported from sources that don't carry the field.
+    /// Defaulting via `#[serde(default)]` so older serialized blobs deserialize cleanly.
+    #[serde(default)]
+    pub contact_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -84,6 +89,7 @@ mod tests {
             direction: MessageDirection::Outgoing,
             thread_id: Some("thread-1".into()),
             attachments: Vec::new(),
+            contact_name: Some("Test Contact".into()),
         };
 
         let json = serde_json::to_string(&msg).unwrap();

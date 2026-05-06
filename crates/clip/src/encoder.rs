@@ -92,22 +92,22 @@ fn infer_input_size_from_preprocessor(model_path: &Path) -> Option<u32> {
 }
 
 pub fn probe_cuda_support(clip_model: &Path) -> Result<bool> {
-    let builder = Session::builder().map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
+    let builder = Session::builder().map_err(|e| AppError::Media(e.to_string()))?;
     let provider = ort::execution_providers::CUDAExecutionProvider::default().build();
-    let builder = match builder.with_execution_providers([provider]) {
+    let mut builder = match builder.with_execution_providers([provider]) {
         Ok(updated) => updated,
         Err(_) => return Ok(false),
     };
     let _session = builder
         .commit_from_file(clip_model)
-        .map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
+        .map_err(|e| AppError::Media(e.to_string()))?;
     Ok(true)
 }
 
 impl ClipEncoder {
     pub fn new(clip_model: &Path, nsfw_weights: &Path) -> Result<Self> {
         let mut builder = Session::builder()
-            .map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
+            .map_err(|e| AppError::Media(e.to_string()))?;
 
         if std::env::var("SMS_CLIP_USE_CUDA").ok().as_deref() == Some("1") {
             let provider = ort::execution_providers::CUDAExecutionProvider::default().build();
@@ -120,7 +120,7 @@ impl ClipEncoder {
 
         let session = builder
             .commit_from_file(clip_model)
-            .map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
+            .map_err(|e| AppError::Media(e.to_string()))?;
 
         let input_name = session
             .inputs()
@@ -164,13 +164,13 @@ impl ClipEncoder {
         // Preprocess images -> [batch, 3, 336, 336]
         let tensor = clip_preprocess_batch(images, &self.preprocess)?;
         let input = Tensor::<f32>::from_array(tensor)
-            .map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
+            .map_err(|e| AppError::Media(e.to_string()))?;
 
         // Run CLIP encoder
         let outputs = self
             .session
             .run(ort::inputs! { self.input_name.as_str() => input })
-            .map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
+            .map_err(|e| AppError::Media(e.to_string()))?;
 
         let output = outputs
             .iter()
@@ -181,7 +181,7 @@ impl ClipEncoder {
 
         let array = output
             .try_extract_array::<f32>()
-            .map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
+            .map_err(|e| AppError::Media(e.to_string()))?;
 
         let array = array
             .into_dimensionality::<ndarray::Ix2>()

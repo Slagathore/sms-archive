@@ -33,7 +33,7 @@ impl SearchBackend for Fts5Backend {
         let conn = self.db.connection();
         let mut stmt = conn.prepare(
             "SELECT messages.id, messages.message_id, messages.timestamp, messages.address, \
-                messages.body, messages.body_searchable, messages.message_type, messages.message_direction, messages.thread_id \
+                messages.body, messages.body_searchable, messages.message_type, messages.message_direction, messages.thread_id, messages.contact_name \
              FROM messages_fts \
              JOIN messages ON messages.rowid = messages_fts.rowid \
              WHERE messages_fts MATCH ?1 \
@@ -60,6 +60,7 @@ impl SearchBackend for Fts5Backend {
                 direction: MessageDirection::from_i32(message_direction),
                 thread_id: row.get(8)?,
                 attachments: Vec::new(),
+                contact_name: row.get(9)?,
             };
             Ok(msg)
         })?;
@@ -127,7 +128,7 @@ pub fn semantic_search(
     let mut stmt = conn.prepare(
         "SELECT embeddings.message_id, embeddings.vector, embeddings.dims, \
                 messages.timestamp, messages.address, messages.body, messages.body_searchable, \
-                messages.message_type, messages.message_direction, messages.thread_id \
+                messages.message_type, messages.message_direction, messages.thread_id, messages.contact_name \
          FROM embeddings \
          JOIN messages ON messages.id = embeddings.message_id \
          WHERE embeddings.model_id = ?1",
@@ -170,6 +171,7 @@ pub fn semantic_search(
             direction: MessageDirection::from_i32(message_direction),
             thread_id: row.get(9)?,
             attachments: Vec::new(),
+            contact_name: row.get(10)?,
         };
         if heap.len() < top_k {
             heap.push(Reverse(ScoreEntry {
@@ -629,6 +631,8 @@ fn materialize_message(doc: &tantivy::Document, fields: &TantivyFields) -> Messa
         direction: MessageDirection::Unknown,
         thread_id: get_text(doc, fields.thread_id),
         attachments: Vec::new(),
+        // #todo: index contact_name in tantivy and read it back here once added.
+        contact_name: None,
     }
 }
 

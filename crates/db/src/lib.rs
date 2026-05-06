@@ -115,8 +115,8 @@ impl BatchWriter {
 
         let tx = self.conn.transaction()?;
         let mut stmt = tx.prepare_cached(
-            "INSERT INTO messages (id, message_id, dedupe_hash, timestamp, address, body, body_searchable, message_type, message_direction, thread_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            "INSERT INTO messages (id, message_id, dedupe_hash, timestamp, address, body, body_searchable, message_type, message_direction, thread_id, contact_name)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
              ON CONFLICT DO NOTHING",
         )?;
 
@@ -153,6 +153,7 @@ impl BatchWriter {
                 msg.message_type as i32,
                 msg.direction.as_i32(),
                 msg.thread_id,
+                msg.contact_name,
             ])?;
             if changed > 0 {
                 inserted += 1;
@@ -474,6 +475,135 @@ pub fn insert_media_results_batch(
     Ok(inserted)
 }
 
+/// Outcome of `auto_create_contacts_from_messages`. Used by the ingest pipeline
+/// to log how many fresh contact rows were spun up after a batch import.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct AutoContactStats {
+    pub contacts_created: usize,
+    pub addresses_linked: usize,
+    pub addresses_skipped_group: usize,
+}
+
+/// Bootstrap `contacts` and `contact_addresses` rows for any address that
+/// appears in `messages` but has no existing `contact_addresses` entry.
+///
+/// Uses the most-recent non-null `messages.contact_name` for the address as
+/// `display_name`, falling back to the address itself if no name was ever
+/// recorded. New rows are tagged `source = 'auto'`.
+///
+/// Group MMS addresses (containing `~`) are deliberately skipped — analytics
+/// excludes them and we don't want to pollute the contacts list with synthetic
+/// "+15551234567~+15559876543" labels.
+///
+/// Idempotent: re-running after no new addresses arrive is a no-op.
+pub fn auto_create_contacts_from_messages(conn: &Connection) -> Result<AutoContactStats> {
+    let mut stats = AutoContactStats::default();
+
+    // Gather (address, latest_contact_name) pairs that need a contact.
+    // Subquery picks the latest contact_name for each address (max timestamp wins).
+    // We only emit addresses that don't already have a contact_addresses row.
+    let mut stmt = conn.prepare(
+        "SELECT m.address, \
+                (SELECT contact_name FROM messages \
+                 WHERE address = m.address AND contact_name IS NOT NULL \
+                 ORDER BY timestamp DESC LIMIT 1) AS latest_name \
+         FROM messages m \
+         WHERE m.address NOT IN (SELECT address FROM contact_addresses) \
+         GROUP BY m.address",
+    ).map_err(AppError::Database)?;
+
+    let rows: Vec<(String, Option<String>)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(AppError::Database)?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(stmt);
+
+    if rows.is_empty() {
+        return Ok(stats);
+    }
+
+    // Single transaction for all inserts — fast even on first-run with thousands
+    // of new contacts, and keeps the contacts table consistent if anything fails.
+    conn.execute_batch("BEGIN IMMEDIATE TRANSACTION")
+        .map_err(AppError::Database)?;
+
+    let result: std::result::Result<(), rusqlite::Error> = (|| {
+        let mut insert_contact = conn.prepare_cached(
+            "INSERT INTO contacts (id, display_name, source) VALUES (?1, ?2, 'auto')",
+        )?;
+        let mut insert_address = conn.prepare_cached(
+            "INSERT OR IGNORE INTO contact_addresses (id, contact_id, address) VALUES (?1, ?2, ?3)",
+        )?;
+
+        for (address, latest_name) in rows {
+            // Group MMS guard. Belt-and-suspenders even though analytics filters this anyway.
+            if address.contains('~') {
+                stats.addresses_skipped_group += 1;
+                continue;
+            }
+
+            let display_name = latest_name.unwrap_or_else(|| address.clone());
+            let contact_id = Uuid::new_v4().to_string();
+            insert_contact.execute(params![contact_id, display_name])?;
+
+            let address_row_id = Uuid::new_v4().to_string();
+            let changed = insert_address.execute(params![address_row_id, contact_id, address])?;
+            if changed > 0 {
+                stats.addresses_linked += 1;
+                stats.contacts_created += 1;
+            }
+        }
+
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => {
+            conn.execute_batch("COMMIT").map_err(AppError::Database)?;
+        }
+        Err(err) => {
+            // Best-effort rollback; if it errors we still return the original cause.
+            let _ = conn.execute_batch("ROLLBACK");
+            return Err(AppError::Database(err));
+        }
+    }
+
+    Ok(stats)
+}
+
+/// Mark contact_analytics_status entries stale for any contact whose addresses
+/// received messages with `created_at >= since_unix_secs`. Also seeds a status
+/// row for contacts that don't have one yet (so newly-bootstrapped contacts get
+/// flagged on first ingest).
+///
+/// Returns the number of contacts marked stale.
+pub fn mark_contact_analytics_stale_since(conn: &Connection, since_unix_secs: i64) -> Result<usize> {
+    // Seed missing status rows so freshly auto-created contacts have a record to flag.
+    conn.execute(
+        "INSERT OR IGNORE INTO contact_analytics_status (contact_id, last_computed_at, is_stale) \
+         SELECT c.id, 0, 1 FROM contacts c",
+        [],
+    )
+    .map_err(AppError::Database)?;
+
+    // Flag stale: any contact whose linked addresses received a message after the cutoff.
+    let updated = conn.execute(
+        "UPDATE contact_analytics_status \
+         SET is_stale = 1 \
+         WHERE contact_id IN ( \
+             SELECT DISTINCT ca.contact_id \
+             FROM contact_addresses ca \
+             JOIN messages m ON m.address = ca.address \
+             WHERE m.created_at >= ?1 \
+         )",
+        params![since_unix_secs],
+    )
+    .map_err(AppError::Database)? as usize;
+
+    Ok(updated)
+}
+
 fn encode_embedding_vector(vector: &[f32]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(vector.len() * 4);
     for v in vector {
@@ -582,6 +712,10 @@ fn run_migrations(conn: &Connection) -> Result<()> {
         (10, include_str!("../migrations/0010_media_nsfw.sql")),
         (11, include_str!("../migrations/0011_media_embeddings.sql")),
         (12, include_str!("../migrations/0012_attachment_gps_cache.sql")),
+        (13, include_str!("../migrations/0013_message_contact_name.sql")),
+        (14, include_str!("../migrations/0014_analytics_tables.sql")),
+        (15, include_str!("../migrations/0015_contacts_source.sql")),
+        (16, include_str!("../migrations/0016_sentiment_and_jokes.sql")),
     ];
     // #todo: add a post-migration backfill that infers message_direction from legacy fields if available.
 
@@ -655,6 +789,34 @@ fn run_migrations(conn: &Connection) -> Result<()> {
                 )
                 .map_err(AppError::Database)?;
             }
+        }
+        if *target == 13 && column_exists(conn, "messages", "contact_name")? {
+            if table_exists(conn, "schema_version")? {
+                conn.execute("UPDATE schema_version SET version = ?1", params![target])?;
+            }
+            version = *target;
+            continue;
+        }
+        if *target == 14 && table_exists(conn, "analytics_meta")? {
+            if table_exists(conn, "schema_version")? {
+                conn.execute("UPDATE schema_version SET version = ?1", params![target])?;
+            }
+            version = *target;
+            continue;
+        }
+        if *target == 15 && column_exists(conn, "contacts", "source")? {
+            if table_exists(conn, "schema_version")? {
+                conn.execute("UPDATE schema_version SET version = ?1", params![target])?;
+            }
+            version = *target;
+            continue;
+        }
+        if *target == 16 && column_exists(conn, "pair_analytics", "sentiment_timeline_json")? {
+            if table_exists(conn, "schema_version")? {
+                conn.execute("UPDATE schema_version SET version = ?1", params![target])?;
+            }
+            version = *target;
+            continue;
         }
         conn.execute_batch(sql)?;
         version = *target;
@@ -737,6 +899,7 @@ mod tests {
             direction: MessageDirection::Incoming,
             thread_id: None,
             attachments: Vec::new(),
+            contact_name: None,
         };
         writer.insert_batch(&[msg]).unwrap();
         let count: i64 = writer
@@ -768,6 +931,7 @@ mod tests {
                 file_hash: [9u8; 32],
                 thumbnail_path: None,
             }],
+            contact_name: None,
         };
         writer.insert_batch(&[msg]).unwrap();
         let count: i64 = writer
@@ -846,5 +1010,142 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM media_embeddings", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn analytics_tables_exist_after_open() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let db = Database::open(tmp.path(), ResourceProfile::Low).unwrap();
+        let conn = db.connection();
+        for table in [
+            "conversations",
+            "contact_analytics",
+            "pair_analytics",
+            "activity_daily",
+            "activity_hourly",
+            "analytics_meta",
+            "analytics_overrides",
+            "contact_analytics_status",
+        ] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    params![table],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "table {} missing after open", table);
+        }
+        // analytics_meta should be seeded with defaults.
+        let meta_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM analytics_meta", [], |r| r.get(0))
+            .unwrap();
+        assert!(meta_count > 0, "analytics_meta has no seed rows");
+    }
+
+    #[test]
+    fn migrations_are_idempotent() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        // First open runs all migrations forward.
+        let _db = Database::open(tmp.path(), ResourceProfile::Low).unwrap();
+        // Second open should be a no-op for migrations and must not fail.
+        let db2 = Database::open(tmp.path(), ResourceProfile::Low).unwrap();
+        let conn = db2.connection();
+        let version: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert!(version >= 15, "schema_version did not advance to >=15: got {}", version);
+    }
+
+    #[test]
+    fn auto_create_contacts_creates_rows() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let db = Database::open(tmp.path(), ResourceProfile::Low).unwrap();
+        let conn = db.connection();
+
+        // Insert two messages with the same address but different contact_names at different timestamps.
+        // The latest non-null contact_name should win for display_name.
+        conn.execute(
+            "INSERT INTO messages (id, timestamp, address, body, body_searchable, message_type, message_direction, contact_name)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params!["m1", 100i64, "5551234567", "older", "older", MessageType::Sms as i32, MessageDirection::Incoming as i32, "Old Name"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO messages (id, timestamp, address, body, body_searchable, message_type, message_direction, contact_name)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params!["m2", 200i64, "5551234567", "newer", "newer", MessageType::Sms as i32, MessageDirection::Outgoing as i32, "New Name"],
+        )
+        .unwrap();
+        // Address with no contact_name should fall back to the address itself.
+        conn.execute(
+            "INSERT INTO messages (id, timestamp, address, body, body_searchable, message_type, message_direction)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params!["m3", 300i64, "5559999999", "anon", "anon", MessageType::Sms as i32, MessageDirection::Incoming as i32],
+        )
+        .unwrap();
+        // Group MMS row should be skipped.
+        conn.execute(
+            "INSERT INTO messages (id, timestamp, address, body, body_searchable, message_type, message_direction)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params!["m4", 400i64, "5551234567~5552223333", "group", "group", MessageType::Mms as i32, MessageDirection::Outgoing as i32],
+        )
+        .unwrap();
+
+        let stats = auto_create_contacts_from_messages(conn).unwrap();
+        assert_eq!(stats.contacts_created, 2);
+        assert_eq!(stats.addresses_skipped_group, 1);
+
+        // Display name for the first address must be the most-recent contact_name.
+        let display: String = conn
+            .query_row(
+                "SELECT c.display_name FROM contacts c \
+                 JOIN contact_addresses ca ON ca.contact_id = c.id \
+                 WHERE ca.address = ?1",
+                params!["5551234567"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(display, "New Name");
+
+        // Address-only fallback for the second address.
+        let display2: String = conn
+            .query_row(
+                "SELECT c.display_name FROM contacts c \
+                 JOIN contact_addresses ca ON ca.contact_id = c.id \
+                 WHERE ca.address = ?1",
+                params!["5559999999"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(display2, "5559999999");
+
+        // Re-running must be a no-op (no new contacts created).
+        let stats2 = auto_create_contacts_from_messages(conn).unwrap();
+        assert_eq!(stats2.contacts_created, 0);
+    }
+
+    #[test]
+    fn mark_stale_flags_affected_contacts() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let db = Database::open(tmp.path(), ResourceProfile::Low).unwrap();
+        let conn = db.connection();
+
+        // Seed: one message, one auto-created contact.
+        conn.execute(
+            "INSERT INTO messages (id, timestamp, address, body, body_searchable, message_type, message_direction)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params!["m1", 1i64, "5550000001", "hi", "hi", MessageType::Sms as i32, MessageDirection::Incoming as i32],
+        )
+        .unwrap();
+        auto_create_contacts_from_messages(conn).unwrap();
+
+        // Cutoff well in the future: nothing should be flagged stale.
+        let stale_future = mark_contact_analytics_stale_since(conn, i64::MAX).unwrap();
+        assert_eq!(stale_future, 0, "future cutoff must not flag anything");
+
+        // Cutoff at zero: every contact whose addresses received messages must be flagged.
+        let stale_now = mark_contact_analytics_stale_since(conn, 0).unwrap();
+        assert!(stale_now >= 1, "expected at least one stale flag, got {}", stale_now);
     }
 }

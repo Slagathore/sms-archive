@@ -28,3 +28,4 @@ sms-datagen = { path = "../datagen" }
 sms-search = { path = "../search" }
 sms-ml = { path = "../ml", features = ["onnx"] }
 sms-media-process = { path = "../media_process" }
+sms-analytics = { path = "../analytics" }

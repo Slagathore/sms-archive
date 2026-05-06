@@ -16,6 +16,7 @@ members = [
     "crates/cli",
     "crates/app",
     "crates/assistant",
+    "crates/analytics",
 ]
 
 [workspace.package]
@@ -61,6 +62,15 @@ memmap2 = "0.9"
 
 # Unicode normalization
 unicode-normalization = "0.1"
+
+# Unicode-aware grapheme cluster iteration (analytics emoji extraction)
+unicode-segmentation = "1.11"
+
+# Emoji-property predicates
+unic-emoji-char = "0.9"
+
+# Regex (analytics pattern matchers)
+regex = "1.10"
 
 # CLI parsing
 clap = { version = "4.4", features = ["derive", "cargo"] }

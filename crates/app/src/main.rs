@@ -32,6 +32,8 @@ use std::sync::{
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime};
 
+mod analytics_tab;
+
 struct SmsArchiveApp {
     active_tab: AppTab,
     db_path: String,
@@ -235,6 +237,7 @@ struct SmsArchiveApp {
     log_guard: Option<tracing_appender::non_blocking::WorkerGuard>,
     ui_settings_snapshot: String,
     ui_settings_last_save: Instant,
+    analytics: analytics_tab::AnalyticsTabState,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
@@ -550,6 +553,7 @@ impl Default for SmsArchiveApp {
             log_guard: None,
             ui_settings_snapshot: String::new(),
             ui_settings_last_save: Instant::now(),
+            analytics: analytics_tab::AnalyticsTabState::new(),
         };
         app.apply_global_settings(load_global_settings());
         app.apply_ui_settings(load_ui_settings());
@@ -958,6 +962,7 @@ enum AppTab {
     Media,
     Contacts,
     Timeline,
+    Analytics,
     Assistant,
     Map,
     Logs,
@@ -1335,6 +1340,7 @@ impl eframe::App for SmsArchiveApp {
                 ui.selectable_value(&mut self.active_tab, AppTab::Media, "Media");
                 ui.selectable_value(&mut self.active_tab, AppTab::Contacts, "Contacts");
                 ui.selectable_value(&mut self.active_tab, AppTab::Timeline, "Timeline");
+                ui.selectable_value(&mut self.active_tab, AppTab::Analytics, "Analytics");
                 ui.selectable_value(&mut self.active_tab, AppTab::Assistant, "Assistant");
                 ui.selectable_value(&mut self.active_tab, AppTab::Map, "Map");
                 ui.selectable_value(&mut self.active_tab, AppTab::Logs, "Logs");
@@ -4304,6 +4310,10 @@ impl eframe::App for SmsArchiveApp {
                 }
                         });
                     });
+            }
+
+            if matches!(self.active_tab, AppTab::Analytics) {
+                analytics_tab::render_analytics_tab(self, ui);
             }
 
             if matches!(self.active_tab, AppTab::Assistant) {
@@ -8917,7 +8927,7 @@ fn run_paged_fts_filtered(
     let conn = backend.connection();
     let mut sql = String::from(
         "SELECT messages.id, messages.message_id, messages.timestamp, messages.address, \
-                messages.body, messages.body_searchable, messages.message_type, messages.message_direction, messages.thread_id \
+                messages.body, messages.body_searchable, messages.message_type, messages.message_direction, messages.thread_id, messages.contact_name \
          FROM messages_fts \
          JOIN messages ON messages.rowid = messages_fts.rowid \
          WHERE messages_fts MATCH ?",
@@ -8977,6 +8987,7 @@ fn run_paged_fts_filtered(
             direction: sms_types::MessageDirection::from_i32(message_direction),
             thread_id: row.get(8)?,
             attachments: Vec::new(),
+            contact_name: row.get(9)?,
         })
     })?;
     let mut out = Vec::new();
@@ -8994,7 +9005,7 @@ fn load_thread_messages(
     let db = Database::open(std::path::Path::new(db_path), ResourceProfile::detect())?;
     let conn = db.connection();
     let mut sql = String::from(
-        "SELECT id, message_id, timestamp, address, body, body_searchable, message_type, message_direction, thread_id \
+        "SELECT id, message_id, timestamp, address, body, body_searchable, message_type, message_direction, thread_id, contact_name \
          FROM messages WHERE thread_id = ?1 ORDER BY timestamp",
     );
     if limit > 0 {
@@ -9023,6 +9034,7 @@ fn load_thread_messages(
                 direction: sms_types::MessageDirection::from_i32(message_direction),
                 thread_id: row.get(8)?,
                 attachments: Vec::new(),
+                contact_name: row.get(9)?,
             })
         })?;
         for r in rows {
@@ -9050,6 +9062,7 @@ fn load_thread_messages(
                 direction: sms_types::MessageDirection::from_i32(message_direction),
                 thread_id: row.get(8)?,
                 attachments: Vec::new(),
+                contact_name: row.get(9)?,
             })
         })?;
         for r in rows {
@@ -9077,7 +9090,7 @@ fn load_thread_window(
     let mut before = Vec::new();
     let mut after = Vec::new();
     let mut stmt_before = conn.prepare(
-        "SELECT id, message_id, timestamp, address, body, body_searchable, message_type, message_direction, thread_id \
+        "SELECT id, message_id, timestamp, address, body, body_searchable, message_type, message_direction, thread_id, contact_name \
          FROM messages WHERE thread_id = ?1 AND timestamp <= ?2 \
          ORDER BY timestamp DESC LIMIT ?3",
     )?;
@@ -9101,6 +9114,7 @@ fn load_thread_window(
             direction: sms_types::MessageDirection::from_i32(message_direction),
             thread_id: row.get(8)?,
             attachments: Vec::new(),
+            contact_name: row.get(9)?,
         })
     })?;
     for r in rows {
@@ -9109,7 +9123,7 @@ fn load_thread_window(
     before.reverse();
 
     let mut stmt_after = conn.prepare(
-        "SELECT id, message_id, timestamp, address, body, body_searchable, message_type, message_direction, thread_id \
+        "SELECT id, message_id, timestamp, address, body, body_searchable, message_type, message_direction, thread_id, contact_name \
          FROM messages WHERE thread_id = ?1 AND timestamp > ?2 \
          ORDER BY timestamp ASC LIMIT ?3",
     )?;
@@ -9133,6 +9147,7 @@ fn load_thread_window(
             direction: sms_types::MessageDirection::from_i32(message_direction),
             thread_id: row.get(8)?,
             attachments: Vec::new(),
+            contact_name: row.get(9)?,
         })
     })?;
     for r in rows {
@@ -9151,7 +9166,7 @@ fn load_address_messages(
     let db = Database::open(std::path::Path::new(db_path), ResourceProfile::detect())?;
     let conn = db.connection();
     let mut sql = String::from(
-        "SELECT id, message_id, timestamp, address, body, body_searchable, message_type, message_direction, thread_id \
+        "SELECT id, message_id, timestamp, address, body, body_searchable, message_type, message_direction, thread_id, contact_name \
          FROM messages WHERE address = ?1 ORDER BY timestamp",
     );
     if limit > 0 {
@@ -9180,6 +9195,7 @@ fn load_address_messages(
                 direction: sms_types::MessageDirection::from_i32(message_direction),
                 thread_id: row.get(8)?,
                 attachments: Vec::new(),
+                contact_name: row.get(9)?,
             })
         })?;
         for r in rows {
@@ -9207,6 +9223,7 @@ fn load_address_messages(
                 direction: sms_types::MessageDirection::from_i32(message_direction),
                 thread_id: row.get(8)?,
                 attachments: Vec::new(),
+                contact_name: row.get(9)?,
             })
         })?;
         for r in rows {
@@ -9234,7 +9251,7 @@ fn load_address_window(
     let mut before = Vec::new();
     let mut after = Vec::new();
     let mut stmt_before = conn.prepare(
-        "SELECT id, message_id, timestamp, address, body, body_searchable, message_type, message_direction, thread_id \
+        "SELECT id, message_id, timestamp, address, body, body_searchable, message_type, message_direction, thread_id, contact_name \
          FROM messages WHERE address = ?1 AND timestamp <= ?2 \
          ORDER BY timestamp DESC LIMIT ?3",
     )?;
@@ -9258,6 +9275,7 @@ fn load_address_window(
             direction: sms_types::MessageDirection::from_i32(message_direction),
             thread_id: row.get(8)?,
             attachments: Vec::new(),
+            contact_name: row.get(9)?,
         })
     })?;
     for r in rows {
@@ -9266,7 +9284,7 @@ fn load_address_window(
     before.reverse();
 
     let mut stmt_after = conn.prepare(
-        "SELECT id, message_id, timestamp, address, body, body_searchable, message_type, message_direction, thread_id \
+        "SELECT id, message_id, timestamp, address, body, body_searchable, message_type, message_direction, thread_id, contact_name \
          FROM messages WHERE address = ?1 AND timestamp > ?2 \
          ORDER BY timestamp ASC LIMIT ?3",
     )?;
@@ -9290,6 +9308,7 @@ fn load_address_window(
             direction: sms_types::MessageDirection::from_i32(message_direction),
             thread_id: row.get(8)?,
             attachments: Vec::new(),
+            contact_name: row.get(9)?,
         })
     })?;
     for r in rows {

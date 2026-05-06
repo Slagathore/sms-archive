@@ -44,3 +44,4 @@ sms-ml = { path = "../ml", features = ["onnx"] }
 sms-assistant = { path = "../assistant" }
 sms-media-process = { path = "../media_process" }
 sms-clip = { path = "../clip" }
+sms-analytics = { path = "../analytics" }

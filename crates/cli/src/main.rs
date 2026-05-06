@@ -586,6 +586,55 @@ enum Commands {
         #[arg(long)]
         sha256: Option<String>,
     },
+
+    /// List contacts with message counts. Useful for picking an `analyze-contact` target.
+    ListContacts {
+        /// Path to database
+        #[arg(short, long, default_value = "sms.db")]
+        db: PathBuf,
+
+        /// Hide contacts with fewer than this many messages
+        #[arg(long, default_value_t = 50)]
+        min_messages: i64,
+
+        /// Maximum rows to print (0 = all)
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+
+        /// Output as JSON instead of a table
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+
+    /// Run the analytics pipeline for a single contact and persist results.
+    AnalyzeContact {
+        /// Path to database
+        #[arg(short, long, default_value = "sms.db")]
+        db: PathBuf,
+
+        /// Contact UUID (from `list-contacts`)
+        #[arg(long)]
+        contact_id: String,
+
+        /// User's local UTC offset in seconds (e.g. -21600 for UTC-6)
+        #[arg(long, default_value_t = 0)]
+        tz_offset_secs: i32,
+    },
+
+    /// Show cached analytics for a contact. Reads from pair_analytics — fast.
+    AnalyticsShow {
+        /// Path to database
+        #[arg(short, long, default_value = "sms.db")]
+        db: PathBuf,
+
+        /// Contact UUID
+        #[arg(long)]
+        contact_id: String,
+
+        /// Output as JSON instead of a human-readable summary
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -1248,6 +1297,228 @@ fn main() -> Result<()> {
             version.as_deref(),
             sha256.as_deref(),
         ),
+        Commands::ListContacts {
+            db,
+            min_messages,
+            limit,
+            json,
+        } => run_list_contacts(&db, min_messages, limit, json),
+        Commands::AnalyzeContact {
+            db,
+            contact_id,
+            tz_offset_secs,
+        } => run_analyze_contact(&db, &contact_id, tz_offset_secs),
+        Commands::AnalyticsShow { db, contact_id, json } => {
+            run_analytics_show(&db, &contact_id, json)
+        }
+    }
+}
+
+fn run_list_contacts(db: &Path, min_messages: i64, limit: usize, json: bool) -> Result<()> {
+    let db_conn = Database::open(db, ResourceProfile::detect())?;
+    let conn = db_conn.connection();
+
+    let limit_clause = if limit == 0 {
+        String::new()
+    } else {
+        format!(" LIMIT {}", limit)
+    };
+    let sql = format!(
+        "SELECT c.id, c.display_name, c.source, COUNT(m.id) AS msg_count \
+         FROM contacts c \
+         JOIN contact_addresses ca ON ca.contact_id = c.id \
+         LEFT JOIN messages m ON m.address = ca.address AND m.message_direction IN (1, 2) AND m.address NOT LIKE '%~%' \
+         GROUP BY c.id \
+         HAVING msg_count >= ?1 \
+         ORDER BY msg_count DESC{}",
+        limit_clause
+    );
+
+    #[derive(serde::Serialize)]
+    struct Row {
+        id: String,
+        display_name: String,
+        source: String,
+        message_count: i64,
+    }
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows: Vec<Row> = stmt
+        .query_map(params![min_messages], |r| {
+            Ok(Row {
+                id: r.get(0)?,
+                display_name: r.get(1)?,
+                source: r.get::<_, Option<String>>(2)?.unwrap_or_else(|| "unknown".into()),
+                message_count: r.get(3)?,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    if json {
+        let out = serde_json::to_string_pretty(&rows)?;
+        println!("{}", out);
+        return Ok(());
+    }
+
+    println!(
+        "{:<38} {:<28} {:<8} {:>10}",
+        "CONTACT_ID", "DISPLAY_NAME", "SOURCE", "MESSAGES"
+    );
+    println!("{}", "-".repeat(88));
+    for row in &rows {
+        let name_trunc: String = row.display_name.chars().take(28).collect();
+        println!(
+            "{:<38} {:<28} {:<8} {:>10}",
+            row.id, name_trunc, row.source, row.message_count
+        );
+    }
+    println!();
+    println!("{} contact(s) shown", rows.len());
+    Ok(())
+}
+
+fn run_analyze_contact(db: &Path, contact_id: &str, tz_offset_secs: i32) -> Result<()> {
+    let db_conn = Database::open(db, ResourceProfile::detect())?;
+    let conn = db_conn.connection();
+
+    let mut config = sms_analytics::OrchestratorConfig::default();
+    config.tz_offset_secs = tz_offset_secs;
+
+    println!("Running analytics for contact {} ...", contact_id);
+    let started = std::time::Instant::now();
+    let out = sms_analytics::compute_for_contact(conn, contact_id, &config)
+        .map_err(|e| anyhow::anyhow!("orchestrator failed: {}", e))?;
+    let wall_ms = started.elapsed().as_millis();
+
+    println!();
+    println!("==== analytics complete ====");
+    println!("messages processed:  {}", out.message_count);
+    println!("conversations:       {}", out.conversation_count);
+    println!("internal compute:    {} ms", out.elapsed_ms);
+    println!("wall clock:          {} ms", wall_ms);
+    println!("had data:            {}", out.had_data);
+    Ok(())
+}
+
+fn run_analytics_show(db: &Path, contact_id: &str, json: bool) -> Result<()> {
+    let db_conn = Database::open(db, ResourceProfile::detect())?;
+    let conn = db_conn.connection();
+
+    // Pull the headline numbers from pair_analytics + contact_analytics. We
+    // print a small subset; full data lives in the JSON columns of pair_analytics.
+    let display_name: String = conn
+        .query_row(
+            "SELECT display_name FROM contacts WHERE id = ?1",
+            params![contact_id],
+            |r| r.get(0),
+        )
+        .map_err(|_| anyhow::anyhow!("contact not found: {}", contact_id))?;
+
+    #[derive(serde::Serialize)]
+    struct Row {
+        contact_id: String,
+        display_name: String,
+        total_conversations: i64,
+        my_messages: i64,
+        their_messages: i64,
+        my_points: f64,
+        their_points: f64,
+        overall_score: Option<i64>,
+        my_median_response_ms: Option<i64>,
+        their_median_response_ms: Option<i64>,
+        my_rapid_response_pct: Option<f64>,
+        their_rapid_response_pct: Option<f64>,
+        first_message_at: Option<i64>,
+        last_message_at: Option<i64>,
+    }
+
+    let row: Row = conn
+        .query_row(
+            "SELECT \
+                p.total_conversations, ca.my_message_count, ca.their_message_count, \
+                p.my_points, p.their_points, p.overall_score, \
+                p.my_median_response_ms, p.their_median_response_ms, \
+                p.my_rapid_response_pct, p.their_rapid_response_pct, \
+                p.first_message_at, p.last_message_at \
+             FROM pair_analytics p \
+             JOIN contact_analytics ca ON ca.contact_id = p.contact_id \
+             WHERE p.contact_id = ?1",
+            params![contact_id],
+            |r| {
+                Ok(Row {
+                    contact_id: contact_id.to_string(),
+                    display_name: display_name.clone(),
+                    total_conversations: r.get(0)?,
+                    my_messages: r.get(1)?,
+                    their_messages: r.get(2)?,
+                    my_points: r.get(3)?,
+                    their_points: r.get(4)?,
+                    overall_score: r.get(5)?,
+                    my_median_response_ms: r.get(6)?,
+                    their_median_response_ms: r.get(7)?,
+                    my_rapid_response_pct: r.get(8)?,
+                    their_rapid_response_pct: r.get(9)?,
+                    first_message_at: r.get(10)?,
+                    last_message_at: r.get(11)?,
+                })
+            },
+        )
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "no analytics found for {} — run `analyze-contact --contact-id {}` first ({})",
+                contact_id,
+                contact_id,
+                e
+            )
+        })?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&row)?);
+        return Ok(());
+    }
+
+    println!("==== analytics for {} ({}) ====", row.display_name, row.contact_id);
+    println!();
+    println!("Total conversations:    {}", row.total_conversations);
+    println!("Your messages:          {}", row.my_messages);
+    println!("Their messages:         {}", row.their_messages);
+    println!("Your points:            {:.0}", row.my_points);
+    println!("Their points:           {:.0}", row.their_points);
+    if let Some(score) = row.overall_score {
+        println!("Overall chat rating:    {}/100", score);
+    }
+    println!();
+    println!("Response medians:");
+    if let Some(ms) = row.my_median_response_ms {
+        println!("  Yours:                {}", format_ms(ms));
+    }
+    if let Some(ms) = row.their_median_response_ms {
+        println!("  Theirs:               {}", format_ms(ms));
+    }
+    if let Some(pct) = row.my_rapid_response_pct {
+        println!("Rapid response (you):   {:.1}%", pct * 100.0);
+    }
+    if let Some(pct) = row.their_rapid_response_pct {
+        println!("Rapid response (them):  {:.1}%", pct * 100.0);
+    }
+    println!();
+    if let (Some(first), Some(last)) = (row.first_message_at, row.last_message_at) {
+        let days = (last - first) as f64 / (24.0 * 60.0 * 60.0 * 1000.0);
+        println!("Time span: {:.1} days ({} → {})", days, first, last);
+    }
+    Ok(())
+}
+
+fn format_ms(ms: i64) -> String {
+    if ms < 60_000 {
+        format!("{}s", ms / 1000)
+    } else if ms < 60 * 60_000 {
+        format!("{}m", ms / 60_000)
+    } else if ms < 24 * 60 * 60_000 {
+        format!("{}h", ms / (60 * 60_000))
+    } else {
+        format!("{}d", ms / (24 * 60 * 60_000))
     }
 }
 

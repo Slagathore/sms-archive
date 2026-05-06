@@ -1,0 +1,28 @@
+[package]
+name = "sms-analytics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+regex = { workspace = true }
+unicode-segmentation = { workspace = true }
+unic-emoji-char = { workspace = true }
+rusqlite = { workspace = true }
+uuid = { workspace = true }
+
+sms-types = { path = "../types" }
+sms-errors = { path = "../errors" }
+sms-config = { path = "../config" }
+# sms-db is used ONLY by the orchestrator module to load messages and persist
+# results. Pure algorithm modules (segmenter, aggregator, responses, scoring,
+# flow, rating, insights) do not touch the DB and remain trivially unit-testable
+# without a SQLite connection.
+sms-db = { path = "../db" }
+
+[dev-dependencies]
+tempfile = { workspace = true }

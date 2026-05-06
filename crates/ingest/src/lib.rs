@@ -183,6 +183,13 @@ impl Budget {
 
 pub fn ingest_file(input: &Path, db_path: &Path, options: &IngestOptions) -> Result<IngestStats> {
     let start = Instant::now();
+    // Wall-clock seconds at the moment ingest begins. Used after the writer finishes
+    // to identify which messages.created_at rows landed during this run, so we can
+    // mark only the affected contacts' analytics caches as stale.
+    let start_unix_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
     let checkpoint_path = checkpoint_path_for(db_path);
     let mut checkpoint = if options.resume {
         load_checkpoint(&checkpoint_path).unwrap_or_default()
@@ -334,6 +341,13 @@ pub fn ingest_file(input: &Path, db_path: &Path, options: &IngestOptions) -> Res
         details: "Writer thread panicked".into(),
     })??;
 
+    // Post-ingest finalization. Best-effort — these failing should not abort an
+    // otherwise-successful import. The writer connection is dropped at this point,
+    // so we open a fresh one for the bookkeeping passes.
+    if writer_stats.messages_inserted > 0 {
+        finalize_post_ingest(&db_path, start_unix_secs);
+    }
+
     Ok(IngestStats {
         messages_seen: parse_stats.messages_seen,
         messages_inserted: writer_stats.messages_inserted,
@@ -342,6 +356,49 @@ pub fn ingest_file(input: &Path, db_path: &Path, options: &IngestOptions) -> Res
         parse_errors: parse_stats.parse_errors,
         elapsed_ms: start.elapsed().as_millis(),
     })
+}
+
+/// Run after the ingest writer thread completes. Bootstraps any new contacts
+/// implied by freshly-inserted messages and flags those contacts' analytics
+/// caches as stale. Errors are logged but never propagated — a failed
+/// bookkeeping pass should never look like a failed import to the caller.
+fn finalize_post_ingest(db_path: &Path, ingest_start_unix_secs: i64) {
+    let profile = sms_config::ResourceProfile::detect();
+    let db = match sms_db::Database::open(db_path, profile) {
+        Ok(db) => db,
+        Err(err) => {
+            tracing::warn!(?err, "post-ingest: could not reopen database for finalization");
+            return;
+        }
+    };
+    let conn = db.connection();
+
+    match sms_db::auto_create_contacts_from_messages(conn) {
+        Ok(stats) => {
+            if stats.contacts_created > 0 || stats.addresses_skipped_group > 0 {
+                tracing::info!(
+                    contacts_created = stats.contacts_created,
+                    addresses_linked = stats.addresses_linked,
+                    addresses_skipped_group = stats.addresses_skipped_group,
+                    "post-ingest: auto-created contacts"
+                );
+            }
+        }
+        Err(err) => {
+            tracing::warn!(?err, "post-ingest: auto-create contacts failed");
+        }
+    }
+
+    match sms_db::mark_contact_analytics_stale_since(conn, ingest_start_unix_secs) {
+        Ok(count) => {
+            if count > 0 {
+                tracing::info!(stale_marked = count, "post-ingest: marked contact analytics stale");
+            }
+        }
+        Err(err) => {
+            tracing::warn!(?err, "post-ingest: marking analytics stale failed");
+        }
+    }
 }
 
 fn run_writer(
@@ -1033,6 +1090,7 @@ fn parse_message_from_tag(e: &BytesStart) -> Result<Message> {
         direction: MessageDirection::Unknown,
         thread_id: None,
         attachments: Vec::<AttachmentRef>::new(),
+        contact_name: None,
     };
 
     for attr in e.attributes().with_checks(false) {
@@ -1068,6 +1126,14 @@ fn parse_message_from_tag(e: &BytesStart) -> Result<Message> {
             }
             b"type" | b"msg_box" => {
                 msg.direction = parse_message_direction(&value);
+            }
+            b"contact_name" => {
+                // SMS Backup & Restore writes the address-book label as `contact_name`.
+                // Treat the literal string "(Unknown)" and the JSON-y "null" as missing.
+                let trimmed = value.trim();
+                if !trimmed.is_empty() && trimmed != "null" && trimmed != "(Unknown)" {
+                    msg.contact_name = Some(trimmed.to_string());
+                }
             }
             _ => {}
         }
@@ -1905,6 +1971,7 @@ fn parse_message_chunk(chunk: &[u8]) -> Result<Message> {
         direction: MessageDirection::Unknown,
         thread_id: None,
         attachments: Vec::new(),
+        contact_name: None,
     };
 
     for part in text.split_whitespace() {
