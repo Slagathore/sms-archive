@@ -20,7 +20,7 @@
 //! # Modules
 //!
 //! - [`types`]      — Shared types (`Participant`, `Conversation`, `MessageRef`,
-//!                    `SegmentationConfig`).
+//!   `SegmentationConfig`).
 //! - [`segmenter`]  — Splits a message stream into conversations on timeout gaps.
 //! - [`media`]      — MIME → category classification.
 //! - [`patterns`]   — Compile-once regex matchers (laugh/apology/question/etc).

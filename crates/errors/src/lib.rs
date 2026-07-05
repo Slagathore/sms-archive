@@ -16,9 +16,6 @@ pub enum AppError {
     #[error("Insufficient disk space: need {needed} GB, have {available} GB")]
     InsufficientDisk { needed: u64, available: u64 },
 
-    #[error("XML entity bomb detected")]
-    XmlBomb,
-
     #[error("Unsupported encoding: {0}")]
     UnsupportedEncoding(String),
 

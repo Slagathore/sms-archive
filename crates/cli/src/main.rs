@@ -773,11 +773,11 @@ fn main() -> Result<()> {
             let db_dir = db.parent().unwrap_or_else(|| std::path::Path::new("."));
             let available = available_disk_bytes(db_dir)?;
             if available < requirements.min_disk {
-                return Err(anyhow::anyhow!(
-                    "Insufficient disk space: need {} GB, have {} GB",
-                    requirements.min_disk / 1024_u64.pow(3),
-                    available / 1024_u64.pow(3)
-                ));
+                return Err(sms_errors::AppError::InsufficientDisk {
+                    needed: requirements.min_disk / 1024_u64.pow(3),
+                    available: available / 1024_u64.pow(3),
+                }
+                .into());
             }
             if resources.total_ram_bytes < requirements.min_ram {
                 eprintln!(
@@ -1392,8 +1392,10 @@ fn run_analyze_contact(db: &Path, contact_id: &str, tz_offset_secs: i32) -> Resu
     let db_conn = Database::open(db, ResourceProfile::detect())?;
     let conn = db_conn.connection();
 
-    let mut config = sms_analytics::OrchestratorConfig::default();
-    config.tz_offset_secs = tz_offset_secs;
+    let config = sms_analytics::OrchestratorConfig {
+        tz_offset_secs,
+        ..Default::default()
+    };
 
     println!("Running analytics for contact {} ...", contact_id);
     let started = std::time::Instant::now();
@@ -1602,6 +1604,7 @@ fn run_verify(db: &Path, summary: Option<&Path>, rebuild: bool) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)] // mirrors the clap subcommand's flag list
 fn run_semantic_search(
     db: &Path,
     query: &str,
@@ -1840,6 +1843,7 @@ fn run_model_purge(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)] // mirrors the clap subcommand's flag list
 fn run_embeddings(
     db: &Path,
     model_path: Option<&Path>,

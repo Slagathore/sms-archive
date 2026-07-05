@@ -34,6 +34,9 @@ use walkdir::WalkDir;
 
 mod analytics_tab;
 
+/// Result slot for the media grid query: (rows for the current page, total count).
+type PendingMediaSlot = Arc<Mutex<Option<(Vec<AttachmentRow>, usize)>>>;
+
 struct SmsArchiveApp {
     active_tab: AppTab,
     db_path: String,
@@ -148,7 +151,7 @@ struct SmsArchiveApp {
     media_page_offset: usize,
     media_total_count: usize,
     media_in_flight: bool,
-    pending_media: Arc<Mutex<Option<(Vec<AttachmentRow>, usize)>>>,
+    pending_media: PendingMediaSlot,
     selected_media_ids: HashSet<String>,
     media_batch_status: String,
     pending_ocr: Arc<Mutex<Vec<OcrUpdate>>>,
@@ -813,10 +816,11 @@ struct ContactMergeState {
     favorite: MergeChoice,       // Phase 3: NEW
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 enum TimelineGranularity {
     Day,
     Week,
+    #[default]
     Month,
 }
 
@@ -838,14 +842,9 @@ impl TimelineGranularity {
     }
 }
 
-impl Default for TimelineGranularity {
-    fn default() -> Self {
-        TimelineGranularity::Month
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 enum TimelineChartMode {
+    #[default]
     Bar,
     Line,
 }
@@ -856,12 +855,6 @@ impl TimelineChartMode {
             TimelineChartMode::Bar => "Bar",
             TimelineChartMode::Line => "Line",
         }
-    }
-}
-
-impl Default for TimelineChartMode {
-    fn default() -> Self {
-        TimelineChartMode::Bar
     }
 }
 
@@ -1223,11 +1216,14 @@ impl eframe::App for SmsArchiveApp {
             }
         }
 
-        if let Some(job) = &mut self.import_job {
-            if job.handle.is_finished() {
+        if self
+            .import_job
+            .as_ref()
+            .is_some_and(|job| job.handle.is_finished())
+        {
+            if let Some(job) = self.import_job.take() {
                 let total = job.progress.total_bytes.load(Ordering::Relaxed);
                 let read = job.progress.bytes_read.load(Ordering::Relaxed);
-                let job = self.import_job.take().unwrap();
                 let input_count = job.inputs.len();
                 match job.handle.join() {
                     Ok(Ok(stats)) => {
@@ -1283,9 +1279,12 @@ impl eframe::App for SmsArchiveApp {
                 }
             }
         }
-        if let Some(job) = &mut self.embed_job {
-            if job.handle.is_finished() {
-                let job = self.embed_job.take().unwrap();
+        if self
+            .embed_job
+            .as_ref()
+            .is_some_and(|job| job.handle.is_finished())
+        {
+            if let Some(job) = self.embed_job.take() {
                 match job.handle.join() {
                     Ok(Ok(stats)) => {
                         self.embed_status = format!(
@@ -1302,9 +1301,12 @@ impl eframe::App for SmsArchiveApp {
                 }
             }
         }
-        if let Some(job) = &mut self.clip_job {
-            if job.handle.is_finished() {
-                let job = self.clip_job.take().unwrap();
+        if self
+            .clip_job
+            .as_ref()
+            .is_some_and(|job| job.handle.is_finished())
+        {
+            if let Some(job) = self.clip_job.take() {
                 match job.handle.join() {
                     Ok(Ok(stats)) => {
                         self.clip_status = format!(
@@ -2182,7 +2184,7 @@ impl eframe::App for SmsArchiveApp {
                     let total_pages = if total_results == 0 {
                         1
                     } else {
-                        (total_results + self.page_size - 1) / self.page_size
+                        total_results.div_ceil(self.page_size)
                     };
                     let current_page = if total_results == 0 {
                         0
@@ -3303,7 +3305,7 @@ impl eframe::App for SmsArchiveApp {
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
                                 let media = self.media_results.clone();
-                                let split = (media.len() + 1) / 2;
+                                let split = media.len().div_ceil(2);
                                 let (left, right) = media.split_at(split);
                                 ui.columns(2, |cols| {
                                     let mut render = |ui: &mut egui::Ui, items: &[AttachmentRow]| {
@@ -4215,7 +4217,7 @@ impl eframe::App for SmsArchiveApp {
                         .map(|b| b.chars().count())
                         .max()
                         .unwrap_or(1);
-                    let label_height = (max_label_len as f32 * 9.0).max(28.0).min(160.0);
+                    let label_height = (max_label_len as f32 * 9.0).clamp(28.0, 160.0);
                     let total_width = (buckets.len() as f32) * (bar_width + spacing) + spacing;
 
                     ui.push_id("timeline_chart", |ui| {
@@ -5242,22 +5244,22 @@ impl SmsArchiveApp {
             .optional()
             .unwrap_or(None)
         };
-        if let Some(value) = load_key(&conn, "assistant_base_url") {
+        if let Some(value) = load_key(conn, "assistant_base_url") {
             self.assistant_base_url = value;
         }
-        if let Some(value) = load_key(&conn, "assistant_model") {
+        if let Some(value) = load_key(conn, "assistant_model") {
             self.assistant_model = value;
         }
-        if let Some(value) = load_key(&conn, "vision_base_url") {
+        if let Some(value) = load_key(conn, "vision_base_url") {
             self.vision_base_url = value;
         }
-        if let Some(value) = load_key(&conn, "vision_model") {
+        if let Some(value) = load_key(conn, "vision_model") {
             self.vision_model = value;
         }
-        if let Some(value) = load_key(&conn, "vision_prompt") {
+        if let Some(value) = load_key(conn, "vision_prompt") {
             self.vision_prompt = value;
         }
-        if let Some(value) = load_key(&conn, "tesseract_cmd") {
+        if let Some(value) = load_key(conn, "tesseract_cmd") {
             self.tesseract_cmd = value;
         }
         self.assistant.ollama_url = self.assistant_base_url.clone();
@@ -5288,34 +5290,34 @@ impl SmsArchiveApp {
         let parse_bool = |value: &str| -> bool {
             matches!(value.trim().to_lowercase().as_str(), "1" | "true" | "yes")
         };
-        if let Some(value) = load_key(&conn, "clip_model_path") {
+        if let Some(value) = load_key(conn, "clip_model_path") {
             self.clip_model_path = value;
         }
-        if let Some(value) = load_key(&conn, "clip_nsfw_weights_path") {
+        if let Some(value) = load_key(conn, "clip_nsfw_weights_path") {
             self.clip_nsfw_weights_path = value;
         }
-        if let Some(value) = load_key(&conn, "clip_batch_size") {
+        if let Some(value) = load_key(conn, "clip_batch_size") {
             if let Ok(parsed) = value.parse::<usize>() {
                 self.clip_batch_size = parsed.max(1);
             }
         }
-        if let Some(value) = load_key(&conn, "clip_max_keyframes") {
+        if let Some(value) = load_key(conn, "clip_max_keyframes") {
             if let Ok(parsed) = value.parse::<usize>() {
                 self.clip_max_keyframes = parsed.max(1);
             }
         }
-        if let Some(value) = load_key(&conn, "clip_workers") {
+        if let Some(value) = load_key(conn, "clip_workers") {
             if let Ok(parsed) = value.parse::<usize>() {
                 self.clip_workers = parsed.max(1);
             }
         }
-        if let Some(value) = load_key(&conn, "clip_reprocess") {
+        if let Some(value) = load_key(conn, "clip_reprocess") {
             self.clip_reprocess = parse_bool(&value);
         }
-        if let Some(value) = load_key(&conn, "clip_auto_on_import") {
+        if let Some(value) = load_key(conn, "clip_auto_on_import") {
             self.clip_auto_on_import = parse_bool(&value);
         }
-        if let Some(value) = load_key(&conn, "clip_use_cuda") {
+        if let Some(value) = load_key(conn, "clip_use_cuda") {
             self.clip_use_cuda = parse_bool(&value);
         }
         self.autofill_clip_paths();
@@ -5386,26 +5388,26 @@ impl SmsArchiveApp {
                 params![key, value],
             );
         };
-        save_key(&conn, "clip_model_path", self.clip_model_path.trim());
+        save_key(conn, "clip_model_path", self.clip_model_path.trim());
         save_key(
-            &conn,
+            conn,
             "clip_nsfw_weights_path",
             self.clip_nsfw_weights_path.trim(),
         );
-        save_key(&conn, "clip_batch_size", &self.clip_batch_size.to_string());
+        save_key(conn, "clip_batch_size", &self.clip_batch_size.to_string());
         save_key(
-            &conn,
+            conn,
             "clip_max_keyframes",
             &self.clip_max_keyframes.to_string(),
         );
-        save_key(&conn, "clip_workers", &self.clip_workers.to_string());
-        save_key(&conn, "clip_reprocess", &self.clip_reprocess.to_string());
+        save_key(conn, "clip_workers", &self.clip_workers.to_string());
+        save_key(conn, "clip_reprocess", &self.clip_reprocess.to_string());
         save_key(
-            &conn,
+            conn,
             "clip_auto_on_import",
             &self.clip_auto_on_import.to_string(),
         );
-        save_key(&conn, "clip_use_cuda", &self.clip_use_cuda.to_string());
+        save_key(conn, "clip_use_cuda", &self.clip_use_cuda.to_string());
     }
 
     fn autofill_clip_paths(&mut self) {
@@ -6172,7 +6174,7 @@ impl SmsArchiveApp {
             }
         };
         let reader = std::io::BufReader::new(file);
-        let mut lines: Vec<String> = reader.lines().flatten().collect();
+        let mut lines: Vec<String> = reader.lines().map_while(std::result::Result::ok).collect();
         if lines.len() > self.log_max_lines {
             let start = lines.len().saturating_sub(self.log_max_lines);
             lines = lines.split_off(start);
@@ -7115,7 +7117,11 @@ impl SmsArchiveApp {
                             )?;
                             model_id = Some(id);
                         }
-                        let model_id = model_id.as_ref().unwrap();
+                        // Set in the is_none() branch above; guard instead of
+                        // unwrapping so a future refactor can't panic here.
+                        let Some(model_id) = model_id.as_ref() else {
+                            continue;
+                        };
                         sms_db::insert_media_embedding(
                             conn,
                             &attachment_id,
@@ -7249,7 +7255,7 @@ impl SmsArchiveApp {
                     }
                     let resolved =
                         resolve_media_path_with_root(&db_path, media_root.as_ref(), &path);
-                    if resolved.as_ref().map(|p| p.exists()).unwrap_or(false) == false {
+                    if !resolved.as_ref().map(|p| p.exists()).unwrap_or(false) {
                         missing += 1;
                         if missing_samples.len() < 10 {
                             missing_samples.push(path);
@@ -7277,7 +7283,7 @@ impl SmsArchiveApp {
                                 continue;
                             }
                             media_files_total += 1;
-                            if let Some(rel) = entry.path().strip_prefix(&root).ok() {
+                            if let Ok(rel) = entry.path().strip_prefix(&root) {
                                 let rel_str = rel.to_string_lossy().replace('\\', "/");
                                 let rel_norm = rel_str.to_lowercase();
                                 if !db_paths.contains(&rel_norm) {
@@ -7502,12 +7508,12 @@ impl SmsArchiveApp {
                     existing.insert(rel_lower);
 
                     // Batch commit every 1000 inserts
-                    if inserted % 1000 == 0 {
+                    if inserted.is_multiple_of(1000) {
                         conn.execute_batch("COMMIT; BEGIN TRANSACTION")?;
                     }
 
                     // Report progress every 500 files scanned
-                    if scanned % 500 == 0 {
+                    if scanned.is_multiple_of(500) {
                         if let Ok(mut lock) = progress_pending.lock() {
                             *lock = Some((
                                 format!(
@@ -8224,7 +8230,6 @@ impl SmsArchiveApp {
                 }
             });
             self.embed_generation = self.embed_generation.wrapping_add(1);
-            return;
         }
     }
 
@@ -8346,7 +8351,7 @@ impl SmsArchiveApp {
 
     fn parse_import_inputs(&self) -> Vec<PathBuf> {
         self.import_input
-            .split(|c| c == '\n' || c == ';')
+            .split(['\n', ';'])
             .map(|raw| raw.trim())
             .filter(|raw| !raw.is_empty())
             .map(PathBuf::from)
@@ -10485,7 +10490,7 @@ fn vcard_phone_type_from_params(types: &[String]) -> String {
 
 fn format_vcard_name(value: &str) -> String {
     let parts: Vec<&str> = value.split(';').collect();
-    let family = parts.get(0).copied().unwrap_or_default();
+    let family = parts.first().copied().unwrap_or_default();
     let given = parts.get(1).copied().unwrap_or_default();
     let additional = parts.get(2).copied().unwrap_or_default();
     let prefix = parts.get(3).copied().unwrap_or_default();
@@ -10845,8 +10850,7 @@ fn load_timeline_stats(
 
     let mut sent_messages = 0i64;
     if !self_addrs.is_empty() {
-        let placeholders = std::iter::repeat("?")
-            .take(self_addrs.len())
+        let placeholders = std::iter::repeat_n("?", self_addrs.len())
             .collect::<Vec<_>>()
             .join(",");
         let mut params_sent = params_base.clone();
@@ -11063,7 +11067,7 @@ fn tag_gps_cache(db_path: &str, media_root: Option<PathBuf>) -> sms_errors::Resu
 }
 
 fn clamp_lat(lat: f64) -> f64 {
-    lat.max(-85.0511).min(85.0511)
+    lat.clamp(-85.0511, 85.0511)
 }
 
 fn lonlat_to_pixel(lat: f64, lon: f64, zoom: u8) -> (f64, f64) {
@@ -11225,7 +11229,7 @@ fn parse_address_list(value: &str) -> Vec<String> {
     if raw.is_empty() {
         return Vec::new();
     }
-    raw.split(|c| c == '|' || c == ',' || c == ';')
+    raw.split(['|', ',', ';'])
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
@@ -11254,8 +11258,7 @@ fn build_where_clause(
     if !filters.address.trim().is_empty() {
         let addresses = parse_address_list(&filters.address);
         if addresses.len() > 1 {
-            let placeholders = std::iter::repeat("?")
-                .take(addresses.len())
+            let placeholders = std::iter::repeat_n("?", addresses.len())
                 .collect::<Vec<_>>()
                 .join(",");
             clauses.push(format!("{}address IN ({})", prefix, placeholders));
@@ -11310,7 +11313,7 @@ fn split_vision_analysis(text: &str) -> (Option<String>, String) {
     let mut lines = text.lines();
     if let Some(first) = lines.next() {
         if first.trim_start().starts_with('⏱') {
-            let label = format!("{}", first.trim());
+            let label = first.trim().to_string();
             let rest = lines.collect::<Vec<_>>().join("\n");
             return (Some(label), rest);
         }
@@ -11813,8 +11816,7 @@ fn load_attachments_for_messages(
     let ids: Vec<String> = messages.iter().map(|m| m.id.to_string()).collect();
     let chunk_size = 200;
     for chunk in ids.chunks(chunk_size) {
-        let placeholders = std::iter::repeat("?")
-            .take(chunk.len())
+        let placeholders = std::iter::repeat_n("?", chunk.len())
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!(
@@ -11947,7 +11949,7 @@ fn resolve_media_path_candidates(root: &Path, rel_path: &str) -> Vec<PathBuf> {
 }
 
 fn strip_media_prefix(rel_path: &str) -> Option<&str> {
-    let trimmed = rel_path.trim_start_matches(|c| c == '.' || c == '/' || c == '\\');
+    let trimmed = rel_path.trim_start_matches(['.', '/', '\\']);
     trimmed
         .strip_prefix("media/")
         .or_else(|| trimmed.strip_prefix("media\\"))
@@ -12033,6 +12035,7 @@ fn open_file_location(path: &Path) {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // mirrors the Embeddings tab's form fields
 fn run_embed_job(
     db_path: std::path::PathBuf,
     model_path: Option<std::path::PathBuf>,
@@ -12436,8 +12439,10 @@ fn main() {
         "SMS Archive",
         options,
         Box::new(|_cc| {
-            let mut app = SmsArchiveApp::default();
-            app.log_guard = guard;
+            let app = SmsArchiveApp {
+                log_guard: guard,
+                ..Default::default()
+            };
             Box::new(app)
         }),
     ) {

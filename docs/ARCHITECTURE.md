@@ -4,15 +4,31 @@
 SMS Archive Manager is a Rust-first desktop application designed to ingest, index, and search very large SMS/MMS XML exports while remaining responsive. The system is split into focused crates and is designed to keep I/O, parsing, and DB writes bounded and observable.
 
 ## Workspace Map
-- app: native GUI (egui)
-- cli: headless tooling (ingest, verify, doctor, datagen)
+- app: native GUI (egui) — search, import, media gallery, contacts, timeline,
+  analytics dashboard, Ollama assistant, map, logs
+- cli: headless tooling (ingest, verify, doctor, search, export, datagen,
+  media processing, contact analytics)
 - ingest: XML parsing, attachments, checkpointing
-- db: SQLite access, migrations, batch writer
-- search: FTS5 backend (future backend swap via trait)
-- media: thumbnails and hashing
+- db: SQLite access, migrations, batch writer, FTS sync triggers
+- search: FTS5 backend + brute-force semantic search over stored embeddings
+  (an optional Tantivy backend exists behind the `tantivy` feature but does
+  not currently compile — see README)
+- media: thumbnails, content hashing, HEIC (feature-gated), video keyframes
+- media_process: batch orchestration of the CLIP/NSFW media pipeline
+- ml: ONNX Runtime text-embedding service (feature `onnx`), hash-embed
+  dummy fallback otherwise
+- clip: CLIP ONNX image/text encoders and NSFW classifier
+- assistant: Ollama chat client with SQL-backed tools (search, thread fetch)
+- analytics: per-contact relationship analytics (segmentation, response
+  times, sentiment, topics, inside jokes, chat rating, insights)
+- datagen: synthetic SMS XML generator for tests/benchmarks
+- perf: criterion benchmarks (ingest throughput, boundary scanning)
 - config: resource detection and sizing
 - types: core data types
 - errors: unified error taxonomy
+
+Per-crate deep dives live in `docs/*_reference.md`; historical planning
+specs are archived under `docs/design/`.
 
 ## Data Flow
 1) Reader: streams XML from disk using a large buffer.

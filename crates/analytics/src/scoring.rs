@@ -505,8 +505,8 @@ mod tests {
     fn daily_points_split_by_local_date_and_side() {
         // Two messages on the same UTC day but different local days.
         // Aligns with aggregator's daily-bucketing test.
-        let ts1: i64 = 1711058400_000; // 2024-03-21T22:00:00Z → 2024-03-22 04:00 in UTC+6
-        let ts2: i64 = 1711033200_000; // 2024-03-21T15:00:00Z → 2024-03-21 21:00 in UTC+6
+        let ts1: i64 = 1_711_058_400_000; // 2024-03-21T22:00:00Z → 2024-03-22 04:00 in UTC+6
+        let ts2: i64 = 1_711_033_200_000; // 2024-03-21T15:00:00Z → 2024-03-21 21:00 in UTC+6
         let mut messages = vec![
             am(1, ts2, Participant::Them, "earlier hi", &[]),
             am(2, ts1, Participant::Me, "later wave", &[]),

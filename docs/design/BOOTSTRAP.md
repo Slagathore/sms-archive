@@ -1,3 +1,9 @@
+> **HISTORICAL DESIGN DOC** — this is the pre-implementation blueprint the
+> project was built from. It predates the actual code and has not been kept
+> in sync; where it disagrees with the crates, the code wins. Do not use it
+> as current-state documentation (see `docs/ARCHITECTURE.md` and the
+> per-crate `docs/*_reference.md` files instead).
+
 # Rust SMS Archive: Production-Grade Bootstrap (Final)
 **Version**: 2.0 (Post-Expert Review)
 **Status**: Pre-Implementation Blueprint

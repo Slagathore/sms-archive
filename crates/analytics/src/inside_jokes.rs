@@ -317,6 +317,7 @@ fn tokenize(body: &str, min_len: usize) -> Vec<String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)] // fixture builders read better as assignments
 mod tests {
     use super::*;
     use crate::types::Participant;

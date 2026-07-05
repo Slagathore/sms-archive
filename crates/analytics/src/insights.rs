@@ -618,6 +618,7 @@ fn format_duration_short(ms: i64) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)] // fixture builders read better as assignments
 mod tests {
     use super::*;
 

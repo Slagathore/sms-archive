@@ -1,4 +1,10 @@
+# One-shot utility: dump the text of the SMS Backup & Restore XML field
+# reference PDF (docs/) to stdout. Used once to produce
+# docs/sms.xsd_schema.txt; kept for reference. Requires PyPDF2, which is
+# deliberately NOT in requirements.txt (it isn't part of the ML setup).
+# Run from the repo root: python scripts/extract_pdf.py
 import sys
+
 try:
     import PyPDF2
 except Exception as e:

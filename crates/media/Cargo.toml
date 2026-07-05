@@ -6,7 +6,6 @@ license.workspace = true
 
 [dependencies]
 image = { workspace = true }
-img_hash = { workspace = true }
 blake3 = { workspace = true }
 tracing = { workspace = true }
 crossbeam-channel = { workspace = true }

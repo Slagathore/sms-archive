@@ -28,7 +28,5 @@ jobs:
           components: rustfmt, clippy
       - name: Format check
         run: cargo fmt --all -- --check
-      # #todo: tighten to `-- -D warnings` (the bar docs/SETUP.md mandates)
-      # once the ~113 existing clippy warnings are burned down.
       - name: Clippy
-        run: cargo clippy --workspace --all-targets
+        run: cargo clippy --workspace --all-targets -- -D warnings

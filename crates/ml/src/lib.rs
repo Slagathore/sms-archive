@@ -72,6 +72,9 @@ pub struct EmbeddingService {
     backend: Backend,
 }
 
+// One Backend per EmbeddingService (a handful per process); boxing the large
+// ONNX variant would add indirection on every embed call for no real win.
+#[allow(clippy::large_enum_variant)]
 enum Backend {
     Dummy,
     #[cfg(feature = "onnx")]
@@ -194,10 +197,21 @@ impl EmbeddingService {
                 #[cfg(not(feature = "onnx"))]
                 {
                     let _ = path;
+                    tracing::warn!(
+                        "Built without the `onnx` feature; using the hash-embed dummy backend — \
+                         similarity over these vectors is semantically meaningless"
+                    );
                     Backend::Dummy
                 }
             }
-            None => Backend::Dummy,
+            None => {
+                tracing::warn!(
+                    "No text-embedding model configured; using the hash-embed dummy backend — \
+                     'semantic' search over these vectors is semantically meaningless. \
+                     Configure an embedding model to get real semantic search."
+                );
+                Backend::Dummy
+            }
         };
 
         let meta = ModelMeta {

@@ -92,12 +92,8 @@ impl std::fmt::Debug for OnnxClassifier {
     }
 }
 
-impl Clone for OnnxClassifier {
-    fn clone(&self) -> Self {
-        // ONNX sessions can't be cloned, but we shouldn't need to
-        panic!("OnnxClassifier cannot be cloned - use Arc<NsfwClassifier> instead")
-    }
-}
+// Note: deliberately NOT Clone — ONNX sessions can't be cloned. Share via
+// Arc<NsfwClassifier> instead of implementing a panicking Clone.
 
 impl OnnxClassifier {
     pub fn load(path: &Path) -> Result<Self> {

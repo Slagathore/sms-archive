@@ -85,8 +85,9 @@ pub struct RatingInput<'a> {
     pub avg_convo_length_msgs: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum RatingConfidence {
+    #[default]
     Hidden,
     Limited,
     Full,
@@ -104,12 +105,6 @@ pub struct RatingOutput {
     pub mutual_effort: u8,
     /// Whether the rating should be shown, shown-with-caveat, or hidden.
     pub confidence: RatingConfidence,
-}
-
-impl Default for RatingConfidence {
-    fn default() -> Self {
-        Self::Hidden
-    }
 }
 
 /// Run the full rating pipeline.
@@ -250,40 +245,61 @@ fn score_engagement(input: &RatingInput) -> u8 {
 }
 
 /// Consistency: low variance in weekly message counts → high score. Uses
-/// coefficient of variation. Returns 50 when there isn't enough data to
-/// compute a meaningful CV.
+/// coefficient of variation over true calendar weeks (days since epoch / 7),
+/// counting the zero-message weeks between the first and last active day —
+/// `daily` only contains days with activity, so chunking it by index would
+/// make three week-long bursts separated by months of silence look like
+/// steady weekly traffic. Returns 50 when there isn't enough data.
 fn score_consistency(daily: &[DailyBucket]) -> u8 {
     if daily.len() < 7 {
         return 50;
     }
-    let mut weekly_totals: Vec<f64> = Vec::new();
-    let mut week_sum: u32 = 0;
-    for (i, d) in daily.iter().enumerate() {
-        week_sum += d.my_messages + d.their_messages;
-        if (i + 1) % 7 == 0 {
-            weekly_totals.push(week_sum as f64);
-            week_sum = 0;
-        }
+    let epoch = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).expect("constant date is valid");
+    let mut week_totals: std::collections::BTreeMap<i64, f64> = std::collections::BTreeMap::new();
+    let mut d_min = i64::MAX;
+    let mut d_max = i64::MIN;
+    for d in daily {
+        let Ok(date) = chrono::NaiveDate::parse_from_str(&d.day, "%Y-%m-%d") else {
+            continue;
+        };
+        let day_num = date.signed_duration_since(epoch).num_days();
+        d_min = d_min.min(day_num);
+        d_max = d_max.max(day_num);
+        *week_totals.entry(day_num.div_euclid(7)).or_insert(0.0) +=
+            (d.my_messages + d.their_messages) as f64;
     }
-    // Final partial week (if any) — push it so we don't lose data.
-    if week_sum > 0 {
-        weekly_totals.push(week_sum as f64);
+    if week_totals.is_empty() {
+        return 50;
     }
-    if weekly_totals.len() < 4 {
+    let w_first = d_min.div_euclid(7);
+    let w_last = d_max.div_euclid(7);
+    let n_weeks = w_last - w_first + 1;
+    if n_weeks < 4 {
+        return 50;
+    }
+    if n_weeks > 53 * 100 {
+        // A >100-year span means corrupt dates; don't pretend to score it.
         return 50;
     }
 
-    let mean = weekly_totals.iter().sum::<f64>() / weekly_totals.len() as f64;
+    // Pro-rate the (possibly partial) first and last weeks to a full-week
+    // equivalent so steady traffic isn't penalized for where the window
+    // happens to start; interior silent weeks count as zeros.
+    let scaled = |w: i64| -> f64 {
+        let total = week_totals.get(&w).copied().unwrap_or(0.0);
+        let days_in_window = (7 * w + 6).min(d_max) - (7 * w).max(d_min) + 1;
+        total * 7.0 / days_in_window as f64
+    };
+    let n = n_weeks as f64;
+    let mean = (w_first..=w_last).map(scaled).sum::<f64>() / n;
     if mean <= 0.0 {
         return 0;
     }
-    let var = weekly_totals
-        .iter()
-        .map(|v| (v - mean).powi(2))
+    let var = (w_first..=w_last)
+        .map(|w| (scaled(w) - mean).powi(2))
         .sum::<f64>()
-        / weekly_totals.len() as f64;
-    let stdev = var.sqrt();
-    let cv = stdev / mean;
+        / n;
+    let cv = var.sqrt() / mean;
     // CV of 0 → 100, CV of 2+ → 0
     let score = ((1.0 - cv / 2.0) * 100.0).clamp(0.0, 100.0);
     score.round() as u8
@@ -389,6 +405,7 @@ mod tests {
         ContactAggregates::default()
     }
 
+    #[allow(clippy::too_many_arguments)] // test fixture builder
     fn input_with(
         contact: &ContactAggregates,
         responses: &ResponseMetrics,
@@ -525,6 +542,51 @@ mod tests {
         }
         let score = score_consistency(&daily);
         assert!(score >= 95, "perfectly steady should ≥95, got {}", score);
+    }
+
+    #[test]
+    fn consistency_counts_silent_weeks_between_bursts() {
+        // Three identical week-long bursts. Contiguous, they read as steady;
+        // separated by months of silence, the silent calendar weeks must drag
+        // the score down (the old index-mod-7 chunking treated both the same).
+        let burst = |start: &str| -> Vec<DailyBucket> {
+            let d0 = chrono::NaiveDate::parse_from_str(start, "%Y-%m-%d").unwrap();
+            (0..7)
+                .map(|i| DailyBucket {
+                    day: (d0 + chrono::Days::new(i)).format("%Y-%m-%d").to_string(),
+                    my_messages: 5,
+                    their_messages: 5,
+                    my_words: 0,
+                    their_words: 0,
+                    my_media: 0,
+                    their_media: 0,
+                })
+                .collect()
+        };
+        let contiguous: Vec<DailyBucket> = [
+            burst("2024-01-01"),
+            burst("2024-01-08"),
+            burst("2024-01-15"),
+        ]
+        .concat();
+        let with_gaps: Vec<DailyBucket> = [
+            burst("2024-01-01"),
+            burst("2024-04-01"),
+            burst("2024-08-05"),
+        ]
+        .concat();
+        // Pad both to 4+ weeks so neither takes the "not enough data" branch.
+        let contiguous = [contiguous, burst("2024-01-22")].concat();
+        let with_gaps = [with_gaps, burst("2024-11-04")].concat();
+
+        let contiguous_score = score_consistency(&contiguous);
+        let gap_score = score_consistency(&with_gaps);
+        assert!(
+            gap_score < contiguous_score,
+            "bursts with silent months ({}) must score below contiguous bursts ({})",
+            gap_score,
+            contiguous_score
+        );
     }
 
     #[test]

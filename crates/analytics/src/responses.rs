@@ -282,7 +282,7 @@ pub fn compute_response_metrics(
         their_median_response_overnight_ms: median(&them_overnight_ms),
 
         my_histogram: me_histogram,
-        their_histogram: their_histogram,
+        their_histogram,
 
         my_double_messages: me_doubles,
         their_double_messages: them_doubles,

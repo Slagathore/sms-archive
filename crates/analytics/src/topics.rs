@@ -349,6 +349,7 @@ pub fn build_phrase_counts<'a>(
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)] // fixture builders read better as assignments
 mod tests {
     use super::*;
     use crate::types::Participant;

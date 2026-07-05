@@ -376,7 +376,7 @@ mod tests {
             am(4, 1_000_086_400_000, Participant::Me, "good morning"), // +2 (next day)
         ];
         let out = compute_sentiment_timeline(&messages, 0);
-        assert!(out.days.len() >= 1);
+        assert!(!out.days.is_empty());
         // Overall my average: (3 + (-3) + 2) / 3 messages from me with words
         // ... but score_message returns float and depends on lexicon hits.
         // Soft assertion: overall_my has a value.

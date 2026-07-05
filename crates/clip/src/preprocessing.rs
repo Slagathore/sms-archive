@@ -20,7 +20,7 @@ impl Default for ClipPreprocessConfig {
 // #todo: consider exposing a dynamic resize strategy for non-square CLIP input shapes.
 
 const CLIP_MEAN: [f32; 3] = [0.48145466, 0.4578275, 0.40821073];
-const CLIP_STD: [f32; 3] = [0.26862954, 0.26130258, 0.27577711];
+const CLIP_STD: [f32; 3] = [0.26862954, 0.261_302_6, 0.275_777_1];
 
 pub fn clip_preprocess_batch(
     images: &[DynamicImage],

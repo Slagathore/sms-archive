@@ -527,8 +527,8 @@ mod tests {
         // ts2 = 2024-03-21T15:00:00Z = 2024-03-21 21:00 in UTC+6
         // With tz_offset = +21600 (UTC+6), the two messages should land on
         // 2024-03-22 and 2024-03-21 respectively.
-        let ts1: i64 = 1711058400_000; // 2024-03-21T22:00:00Z
-        let ts2: i64 = 1711033200_000; // 2024-03-21T15:00:00Z
+        let ts1: i64 = 1_711_058_400_000; // 2024-03-21T22:00:00Z
+        let ts2: i64 = 1_711_033_200_000; // 2024-03-21T15:00:00Z
         let messages = vec![
             m(1, ts1, Participant::Me, "late", vec![]),
             m(2, ts2, Participant::Them, "earlier", vec![]),
@@ -546,7 +546,7 @@ mod tests {
     fn hourly_buckets_use_local_dow_and_hour() {
         // ts = 2024-03-21T15:30:00Z. UTC+0 → Thursday 15:00.
         // chrono num_days_from_sunday: Sun=0, Mon=1, ..., Thu=4, Sat=6.
-        let ts: i64 = 1711034999_000; // 2024-03-21T15:29:59Z (close enough)
+        let ts: i64 = 1_711_034_999_000; // 2024-03-21T15:29:59Z (close enough)
         let messages = vec![m(1, ts, Participant::Me, "hi", vec![])];
         let out = compute_aggregates(&messages, 0, 5);
         assert_eq!(out.hourly.len(), 1);

@@ -304,10 +304,8 @@ pub fn ingest_file(input: &Path, db_path: &Path, options: &IngestOptions) -> Res
         Ok(stats) => stats,
         Err(err) => {
             drop(tx);
-            if let Ok(writer_result) = writer_handle.join() {
-                if let Err(writer_err) = writer_result {
-                    return Err(writer_err);
-                }
+            if let Ok(Err(writer_err)) = writer_handle.join() {
+                return Err(writer_err);
             }
             return Err(err);
         }
@@ -407,6 +405,7 @@ fn finalize_post_ingest(db_path: &Path, ingest_start_unix_secs: i64) {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // pipeline plumbing; a params struct isn't clearer here
 fn run_writer(
     rx: Receiver<IngestItem>,
     db_path: &Path,
@@ -491,6 +490,7 @@ fn run_writer(
     Ok(stats)
 }
 
+#[allow(clippy::too_many_arguments)] // pipeline plumbing; a params struct isn't clearer here
 fn flush_batch(
     writer: &mut sms_db::BatchWriter,
     batch: &mut Vec<IngestItem>,
@@ -521,6 +521,7 @@ fn flush_batch(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)] // pipeline plumbing; a params struct isn't clearer here
 fn parse_stream(
     path: &Path,
     start_offset: u64,
@@ -797,12 +798,16 @@ struct ParsedMessage {
     attachments: usize,
 }
 
+// One short-lived value per parsed message; the size gap between the Ok and
+// Err variants isn't worth a Box indirection on the hot path.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 enum ParseOutcome {
     Ok(ParsedMessage),
     Err { offset: u64 },
 }
 
+#[allow(clippy::too_many_arguments)] // pipeline plumbing; a params struct isn't clearer here
 fn parse_parallel_boundaries(
     path: &Path,
     start_offset: u64,
@@ -815,6 +820,10 @@ fn parse_parallel_boundaries(
 ) -> Result<ParseStats> {
     let mut file = File::open(path)?;
     detect_encoding(&mut file)?;
+    // SAFETY: mapping a file that another process truncates or rewrites while
+    // we read is undefined behavior (memmap2's documented caveat). We accept
+    // that risk for read-only ingest of a user-selected export file; callers
+    // must not import a file that is still being written.
     let map = unsafe { Mmap::map(&file)? };
 
     let threads = parser_threads.max(1);
@@ -1584,14 +1593,21 @@ fn finalize_message(mut msg: Message) -> Message {
     msg
 }
 
+/// Normalize a phone-like address for thread/dedupe matching.
+///
+/// Assumption: every `+1XXXXXXXXXX` (12 chars after stripping) is a NANP
+/// (US/Canada) number, so the `+1` is dropped to make SMS addresses
+/// ("2147172243") and MMS addresses ("+12147172243") resolve to the same
+/// thread. Non-NANP numbers are left untouched (they keep their `+` and
+/// country code), but a hypothetical non-NANP number that happens to match
+/// the `+1` + 10-digit shape would be mis-normalized — accepted trade-off
+/// for a US-centric archive.
 fn normalize_address(raw: &str) -> String {
     // Strip everything except digits and leading '+'
     let digits_only: String = raw
         .chars()
         .filter(|c| c.is_ascii_digit() || *c == '+')
         .collect();
-    // Normalize +1XXXXXXXXXX (US/Canada) → XXXXXXXXXX so that SMS addresses
-    // ("2147172243") and MMS addresses ("+12147172243") resolve to the same thread.
     if digits_only.starts_with("+1") && digits_only.len() == 12 {
         digits_only[2..].to_string()
     } else {
@@ -1634,6 +1650,10 @@ fn load_checkpoint(path: &Path) -> Option<Checkpoint> {
 /// Memchr-based boundary scan: finds <sms ... /> self-closing tags.
 pub fn scan_boundaries(path: &Path) -> Result<Vec<MessageBoundary>> {
     let file = File::open(path)?;
+    // SAFETY: mapping a file that another process truncates or rewrites while
+    // we read is undefined behavior (memmap2's documented caveat). We accept
+    // that risk for read-only ingest of a user-selected export file; callers
+    // must not import a file that is still being written.
     let map = unsafe { Mmap::map(&file)? };
     let bytes = &map[..];
 
@@ -1661,6 +1681,10 @@ pub fn scan_boundaries(path: &Path) -> Result<Vec<MessageBoundary>> {
 /// Naive boundary scan: simple byte window search for "<sms".
 pub fn scan_boundaries_naive(path: &Path) -> Result<Vec<MessageBoundary>> {
     let file = File::open(path)?;
+    // SAFETY: mapping a file that another process truncates or rewrites while
+    // we read is undefined behavior (memmap2's documented caveat). We accept
+    // that risk for read-only ingest of a user-selected export file; callers
+    // must not import a file that is still being written.
     let map = unsafe { Mmap::map(&file)? };
     let bytes = &map[..];
 
@@ -1683,14 +1707,23 @@ pub fn scan_boundaries_naive(path: &Path) -> Result<Vec<MessageBoundary>> {
     Ok(boundaries)
 }
 
+/// Find the end of a self-closing tag (`/>`), skipping any `>` inside quoted
+/// attribute values — a literal `>` is legal, unescaped, inside XML attribute
+/// quotes (e.g. `body="5 > 3"`), unlike `<`, which must always be escaped.
 fn find_self_closing(buf: &[u8]) -> Option<usize> {
-    let mut i = 0;
-    while let Some(pos) = memchr_iter(b'>', &buf[i..]).next() {
-        let at = i + pos;
-        if at > 0 && buf.get(at - 1) == Some(&b'/') {
-            return Some(at);
+    let mut quote: Option<u8> = None;
+    let mut prev: u8 = 0;
+    for (at, &b) in buf.iter().enumerate() {
+        match quote {
+            Some(q) if b == q => quote = None,
+            Some(_) => {}
+            None => match b {
+                b'"' | b'\'' => quote = Some(b),
+                b'>' if prev == b'/' => return Some(at),
+                _ => {}
+            },
         }
-        i = at + 1;
+        prev = b;
     }
     None
 }
@@ -1698,6 +1731,10 @@ fn find_self_closing(buf: &[u8]) -> Option<usize> {
 /// Boundary scan that handles <sms> and <mms> start/end tags.
 pub fn scan_boundaries_full(path: &Path) -> Result<Vec<MessageBoundary>> {
     let file = File::open(path)?;
+    // SAFETY: mapping a file that another process truncates or rewrites while
+    // we read is undefined behavior (memmap2's documented caveat). We accept
+    // that risk for read-only ingest of a user-selected export file; callers
+    // must not import a file that is still being written.
     let map = unsafe { Mmap::map(&file)? };
     let bytes = &map[..];
 
@@ -1830,12 +1867,25 @@ fn is_tag_boundary(buf: &[u8], start: usize, tag: &[u8]) -> bool {
     )
 }
 
+/// Walk the start tag beginning at `start` (the `<`) to its closing `>`,
+/// skipping any `>` inside quoted attribute values — a literal `>` is legal,
+/// unescaped, inside XML attribute quotes (e.g. `body="5 > 3"`), unlike `<`,
+/// which must always be escaped. Returns (index of `>`, self_closing).
 fn find_start_tag_end(buf: &[u8], start: usize) -> Option<(usize, bool)> {
-    let i = start;
-    let pos = memchr_iter(b'>', &buf[i..]).next()?;
-    let at = i + pos;
-    let self_closing = at > 0 && buf.get(at - 1) == Some(&b'/');
-    Some((at, self_closing))
+    let mut quote: Option<u8> = None;
+    for (off, &b) in buf[start..].iter().enumerate() {
+        let at = start + off;
+        match quote {
+            Some(q) if b == q => quote = None,
+            Some(_) => {}
+            None => match b {
+                b'"' | b'\'' => quote = Some(b),
+                b'>' => return Some((at, at > start && buf[at - 1] == b'/')),
+                _ => {}
+            },
+        }
+    }
+    None
 }
 
 fn find_end_tag(buf: &[u8], start: usize, tag: &[u8]) -> Option<usize> {
@@ -1882,6 +1932,61 @@ mod tests {
 
         let boundaries = scan_boundaries_full(file.path()).unwrap();
         assert_eq!(boundaries.len(), 2);
+    }
+
+    #[test]
+    fn boundary_scan_survives_gt_inside_attribute_value() {
+        // A literal '>' is legal, unescaped, inside a quoted attribute value.
+        // The scanner must not treat it as the end of the start tag, and the
+        // following message must still be found intact.
+        let data = br#"<smses><sms address="+1" date="1" body="5 > 3, still true" /><sms address="+2" date="2" body="yo" /></smses>"#;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(data).unwrap();
+
+        let boundaries = scan_boundaries_full(file.path()).unwrap();
+        assert_eq!(boundaries.len(), 2);
+
+        // End-to-end through the production chunk parser (quick_xml).
+        let chunk = &data[boundaries[0].start_offset as usize..=boundaries[0].end_offset as usize];
+        let msg = parse_message_slice(chunk, None, None, 256, None).unwrap();
+        assert_eq!(msg.body, "5 > 3, still true");
+    }
+
+    #[test]
+    fn boundary_scan_survives_gt_in_single_quoted_attribute() {
+        // Single-quoted attribute containing both double quotes and '>'.
+        let data = b"<smses><sms address='+1' date='1' body='he said \"5 > 3\"' /><sms address='+2' date='2' body='ok' /></smses>";
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(data).unwrap();
+
+        let boundaries = scan_boundaries_full(file.path()).unwrap();
+        assert_eq!(boundaries.len(), 2);
+    }
+
+    #[test]
+    fn boundary_scan_survives_gt_in_mms_part_attribute() {
+        let data = br#"<smses><mms address="+1" date="1"><part ct="text/plain" text="a > b /> c" /></mms><sms address="+2" date="2" body="ok" /></smses>"#;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(data).unwrap();
+
+        let boundaries = scan_boundaries_full(file.path()).unwrap();
+        assert_eq!(boundaries.len(), 2);
+    }
+
+    #[test]
+    fn normalize_address_collapses_nanp_prefix_only() {
+        // NANP +1 prefix folds into the bare 10-digit form...
+        assert_eq!(normalize_address("+1 (214) 717-2243"), "2147172243");
+        assert_eq!(normalize_address("2147172243"), "2147172243");
+        // ...while non-NANP international numbers keep country codes.
+        assert_eq!(normalize_address("+44 20 7946 0958"), "+442079460958");
+        assert_eq!(normalize_address("+12345"), "+12345");
+    }
+
+    #[test]
+    fn find_self_closing_skips_quoted_gt() {
+        let buf = br#"<sms body="a /> b" />"#;
+        assert_eq!(find_self_closing(buf), Some(buf.len() - 1));
     }
 
     #[test]
@@ -1951,47 +2056,47 @@ mod tests {
         assert_eq!(msg.attachments.len(), 1);
         assert_eq!(msg.attachments[0].mime_type, "image/jpeg");
     }
-}
 
-// Legacy helper for tests
-#[cfg(test)]
-fn parse_message_chunk(chunk: &[u8]) -> Result<Message> {
-    let text = std::str::from_utf8(chunk).map_err(|e| AppError::Parse {
-        offset: 0,
-        details: e.to_string(),
-    })?;
+    // Legacy whitespace-splitting chunk parser, kept only for simple test
+    // fixtures. It cannot handle attribute values containing whitespace or
+    // '>' — production code parses chunks with quick_xml (parse_message_slice).
+    fn parse_message_chunk(chunk: &[u8]) -> Result<Message> {
+        let text = std::str::from_utf8(chunk).map_err(|e| AppError::Parse {
+            offset: 0,
+            details: e.to_string(),
+        })?;
 
-    let mut msg = Message {
-        id: Uuid::new_v4(),
-        message_id: None,
-        dedupe_hash: None,
-        timestamp: 0,
-        address: String::new(),
-        body: String::new(),
-        body_searchable: String::new(),
-        message_type: MessageType::Sms,
-        direction: MessageDirection::Unknown,
-        thread_id: None,
-        attachments: Vec::new(),
-        contact_name: None,
-    };
+        let mut msg = Message {
+            id: Uuid::new_v4(),
+            message_id: None,
+            dedupe_hash: None,
+            timestamp: 0,
+            address: String::new(),
+            body: String::new(),
+            body_searchable: String::new(),
+            message_type: MessageType::Sms,
+            direction: MessageDirection::Unknown,
+            thread_id: None,
+            attachments: Vec::new(),
+            contact_name: None,
+        };
 
-    for part in text.split_whitespace() {
-        if let Some(rest) = part.strip_prefix("address=") {
-            msg.address = trim_quotes(rest).to_string();
-        } else if let Some(rest) = part.strip_prefix("date=") {
-            msg.timestamp = trim_quotes(rest).parse().unwrap_or(0);
-        } else if let Some(rest) = part.strip_prefix("body=") {
-            let raw = trim_quotes(rest);
-            msg.body = raw.nfc().collect();
-            msg.body_searchable = raw.nfkd().collect();
+        for part in text.split_whitespace() {
+            if let Some(rest) = part.strip_prefix("address=") {
+                msg.address = trim_quotes(rest).to_string();
+            } else if let Some(rest) = part.strip_prefix("date=") {
+                msg.timestamp = trim_quotes(rest).parse().unwrap_or(0);
+            } else if let Some(rest) = part.strip_prefix("body=") {
+                let raw = trim_quotes(rest);
+                msg.body = raw.nfc().collect();
+                msg.body_searchable = raw.nfkd().collect();
+            }
         }
+
+        Ok(msg)
     }
 
-    Ok(msg)
-}
-
-#[cfg(test)]
-fn trim_quotes(s: &str) -> &str {
-    s.trim_matches('"').trim_matches('\'')
+    fn trim_quotes(s: &str) -> &str {
+        s.trim_matches('"').trim_matches('\'')
+    }
 }

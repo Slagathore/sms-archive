@@ -92,8 +92,7 @@ fn tool_search_messages(db_path: &str, params: &Value) -> Result<String> {
         .get("limit")
         .and_then(|v| v.as_u64())
         .unwrap_or(10)
-        .max(1)
-        .min(100) as usize;
+        .clamp(1, 100) as usize;
     let backend = Fts5Backend::open(Path::new(db_path), ResourceProfile::detect())?;
     let mut results = backend.search(query, limit)?;
     if results.is_empty() {
@@ -161,8 +160,7 @@ fn tool_get_thread(db_path: &str, params: &Value) -> Result<String> {
         .get("limit")
         .and_then(|v| v.as_u64())
         .unwrap_or(50)
-        .max(1)
-        .min(200) as usize;
+        .clamp(1, 200) as usize;
 
     let db = Database::open(Path::new(db_path), ResourceProfile::detect())?;
     let conn = db.connection();
@@ -189,8 +187,7 @@ fn tool_get_thread(db_path: &str, params: &Value) -> Result<String> {
         addresses.push(normalized);
     }
 
-    let placeholders = std::iter::repeat("?")
-        .take(addresses.len())
+    let placeholders = std::iter::repeat_n("?", addresses.len())
         .collect::<Vec<_>>()
         .join(",");
     let sql = format!(
@@ -241,6 +238,14 @@ fn summarize_body(body: &str, max_len: usize) -> String {
     }
 }
 
+fn format_timestamp(timestamp_ms: i64) -> String {
+    if let Some(dt) = chrono::Local.timestamp_millis_opt(timestamp_ms).single() {
+        dt.format("%Y-%m-%d %H:%M").to_string()
+    } else {
+        timestamp_ms.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::summarize_body;
@@ -256,13 +261,5 @@ mod tests {
     #[test]
     fn summarize_body_passes_short_bodies_through() {
         assert_eq!(summarize_body("  hi  ", 160), "hi");
-    }
-}
-
-fn format_timestamp(timestamp_ms: i64) -> String {
-    if let Some(dt) = chrono::Local.timestamp_millis_opt(timestamp_ms).single() {
-        dt.format("%Y-%m-%d %H:%M").to_string()
-    } else {
-        timestamp_ms.to_string()
     }
 }

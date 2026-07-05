@@ -1,3 +1,9 @@
+> **HISTORICAL DESIGN DOC** — this is the specification `crates/analytics`
+> was built from. It predates the implementation and has not been kept in
+> sync (it even names a Tauri + React stack that was later replaced by egui);
+> where it disagrees with the code, the code wins. The `todo!()` snippets
+> below are spec pseudocode, not live code.
+
 # SMS Archive — Analytics Dashboard Module Bootstrap
 
 > **Purpose**: Drop-in specification for building a Mimoto-style relationship analytics dashboard.

@@ -169,8 +169,10 @@ impl AnalyticsSettings {
     /// The orchestrator owns the canonical config shape; this is the
     /// single point where settings flow into compute.
     pub fn to_orchestrator_config(&self, tz_offset_secs: i32) -> sms_analytics::OrchestratorConfig {
-        let mut cfg = sms_analytics::OrchestratorConfig::default();
-        cfg.tz_offset_secs = tz_offset_secs;
+        let mut cfg = sms_analytics::OrchestratorConfig {
+            tz_offset_secs,
+            ..Default::default()
+        };
 
         cfg.segmentation.conversation_timeout_ms = self.conversation_timeout_secs * 1_000;
         cfg.segmentation.big_moment_static_threshold = self.big_moment_threshold_static;
@@ -405,7 +407,11 @@ pub struct SentimentDayLoaded {
     pub day: String,
     pub my_score: Option<f64>,
     pub their_score: Option<f64>,
+    // Deserialized for schema completeness; the chart doesn't render per-side
+    // message counts yet.
+    #[allow(dead_code)]
     pub my_messages: u32,
+    #[allow(dead_code)]
     pub their_messages: u32,
 }
 
@@ -1354,9 +1360,9 @@ fn build_hourly_heatmap_svg(hourly: &[HourlyActivityBucket]) -> String {
             row_top + cell_h * 0.7,
             dow_labels[dow]
         ));
-        for hour in 0..24 {
+        for (hour, &cell) in grid[dow].iter().enumerate() {
             let x = label_w + (hour as f32) * (cell_w + gap);
-            let count = grid[dow][hour] as f32;
+            let count = cell as f32;
             let intensity = if count <= 0.0 {
                 0.0
             } else {
@@ -1419,10 +1425,7 @@ fn build_growth_chart_svg(daily: &[DailyActivityPoint]) -> String {
     let to_svg = |x: f64, y: f64| -> (f64, f64) {
         let nx = if max_x > 0.0 { x / max_x } else { 0.5 };
         let ny = if max_y > 0.0 { 1.0 - y / max_y } else { 1.0 };
-        (
-            pad_l + nx * plot_w as f64,
-            pad_t as f64 + ny * plot_h as f64,
-        )
+        (pad_l + nx * plot_w, pad_t + ny * plot_h)
     };
 
     let mut svg = format!(
@@ -1517,14 +1520,12 @@ fn build_sentiment_chart_svg(days: &[SentimentDayLoaded]) -> String {
     let mut min_y = -0.5f64;
     let mut max_y = 0.5f64;
     for d in days {
-        for opt in [d.my_score, d.their_score] {
-            if let Some(v) = opt {
-                if v < min_y {
-                    min_y = v;
-                }
-                if v > max_y {
-                    max_y = v;
-                }
+        for v in [d.my_score, d.their_score].into_iter().flatten() {
+            if v < min_y {
+                min_y = v;
+            }
+            if v > max_y {
+                max_y = v;
             }
         }
     }
@@ -1733,7 +1734,7 @@ fn build_sankey_svg(data: &SankeyData) -> String {
         let cx = pad_x + ci as f64 * col_step;
         let xl = cx - node_w / 2.0;
 
-        let mut sorted: Vec<&SankeyNode> = col.iter().copied().collect();
+        let mut sorted: Vec<&SankeyNode> = col.to_vec();
         sorted.sort_by(|a, b| a.id.cmp(&b.id));
 
         for n in sorted {
@@ -1790,7 +1791,7 @@ fn build_sankey_svg(data: &SankeyData) -> String {
     }
 
     // Nodes.
-    for (_, b) in &boxes {
+    for b in boxes.values() {
         let color = sankey_node_color_html(b.column);
         svg.push_str(&format!(
             "<rect x=\"{:.1}\" y=\"{:.1}\" width=\"{:.1}\" height=\"{:.1}\" fill=\"{}\" rx=\"2\"/>\n",
@@ -3248,15 +3249,13 @@ fn paint_sentiment_chart(ui: &mut egui::Ui, days: &[SentimentDayLoaded], width: 
     let mut min_y: f32 = -0.5;
     let mut max_y: f32 = 0.5;
     for d in days {
-        for opt in [d.my_score, d.their_score] {
-            if let Some(v) = opt {
-                let v = v as f32;
-                if v < min_y {
-                    min_y = v;
-                }
-                if v > max_y {
-                    max_y = v;
-                }
+        for v in [d.my_score, d.their_score].into_iter().flatten() {
+            let v = v as f32;
+            if v < min_y {
+                min_y = v;
+            }
+            if v > max_y {
+                max_y = v;
             }
         }
     }
@@ -3548,8 +3547,9 @@ fn compute_streaks(daily: &[DailyActivityPoint]) -> Streaks {
         return s;
     }
 
-    let first = *active_days.iter().min().unwrap();
-    let last = *active_days.iter().max().unwrap();
+    let (Some(&first), Some(&last)) = (active_days.iter().min(), active_days.iter().max()) else {
+        return s;
+    };
     let today = chrono::Local::now().date_naive();
     // Walk through to *today* (or `last`, whichever is later) so a tail of
     // recent silence inflates `longest_silent_streak` correctly.
@@ -3774,6 +3774,8 @@ fn paint_sankey(ui: &mut egui::Ui, data: &SankeyData, width: f32, height: f32) {
     // Lay out: each column is a vertical strip. Within a column, stack nodes
     // by id (deterministic). Height ∝ value, scaled to fit.
     struct NodeBox {
+        // The map key already carries the id; kept on the struct for debugging.
+        #[allow(dead_code)]
         id: String,
         rect: egui::Rect,
         value: u32,
@@ -3804,7 +3806,7 @@ fn paint_sankey(ui: &mut egui::Ui, data: &SankeyData, width: f32, height: f32) {
 
         // Sort within column by id for deterministic stacking (matches the
         // analytics crate's flow.rs ordering).
-        let mut sorted: Vec<&SankeyNode> = col.iter().copied().collect();
+        let mut sorted: Vec<&SankeyNode> = col.to_vec();
         sorted.sort_by(|a, b| a.id.cmp(&b.id));
 
         for node in sorted {
@@ -4215,9 +4217,9 @@ fn paint_hourly_heatmap(ui: &mut egui::Ui, hourly: &[HourlyActivityBucket]) {
             label_color,
         );
 
-        for hour in 0..24 {
+        for (hour, &cell) in grid[dow].iter().enumerate() {
             let x = rect.left() + label_w + (hour as f32) * (cell_w + gap);
-            let count = grid[dow][hour] as f32;
+            let count = cell as f32;
             let intensity = if count <= 0.0 {
                 0.0
             } else {

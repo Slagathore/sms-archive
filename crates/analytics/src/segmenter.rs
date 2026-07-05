@@ -184,7 +184,7 @@ impl ConversationBuilder {
 ///
 /// Both metrics depend on aggregate properties of the full conversation list
 /// for this pair, so they can't be computed during the streaming first pass.
-fn enrich_pair_metrics(conversations: &mut Vec<Conversation>, config: &SegmentationConfig) {
+fn enrich_pair_metrics(conversations: &mut [Conversation], config: &SegmentationConfig) {
     if conversations.is_empty() {
         return;
     }

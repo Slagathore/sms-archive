@@ -229,25 +229,26 @@ pub fn checkpoint_wal(conn: &Connection) -> Result<()> {
 }
 
 pub fn rebuild_fts(conn: &Connection) -> Result<()> {
-    conn.execute("DROP TABLE IF EXISTS messages_fts", [])?;
-    conn.execute(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-            body_searchable,
-            address,
-            content=messages,
-            tokenize='unicode61 remove_diacritics 0'
-        )",
-        [],
-    )?;
-    conn.execute(
-        "INSERT INTO messages_fts(rowid, body_searchable, address)
-         SELECT rowid, body_searchable, address FROM messages",
-        [],
-    )?;
-    conn.execute(
-        "INSERT INTO messages_fts(messages_fts) VALUES('optimize')",
-        [],
-    )?;
+    // Atomic: a crash mid-rebuild previously left messages_fts missing or
+    // partially populated until the next successful rebuild.
+    let result = conn.execute_batch(
+        "BEGIN IMMEDIATE;
+         DROP TABLE IF EXISTS messages_fts;
+         CREATE VIRTUAL TABLE messages_fts USING fts5(
+             body_searchable,
+             address,
+             content=messages,
+             tokenize='unicode61 remove_diacritics 0'
+         );
+         INSERT INTO messages_fts(rowid, body_searchable, address)
+         SELECT rowid, body_searchable, address FROM messages;
+         INSERT INTO messages_fts(messages_fts) VALUES('optimize');
+         COMMIT;",
+    );
+    if result.is_err() {
+        let _ = conn.execute_batch("ROLLBACK");
+    }
+    result?;
     Ok(())
 }
 
@@ -602,7 +603,7 @@ pub fn mark_contact_analytics_stale_since(
          )",
             params![since_unix_secs],
         )
-        .map_err(AppError::Database)? as usize;
+        .map_err(AppError::Database)?;
 
     Ok(updated)
 }
@@ -728,6 +729,7 @@ fn run_migrations(conn: &Connection) -> Result<()> {
             16,
             include_str!("../migrations/0016_sentiment_and_jokes.sql"),
         ),
+        (17, include_str!("../migrations/0017_fts_triggers.sql")),
     ];
     // #todo: add a post-migration backfill that infers message_direction from legacy fields if available.
 
@@ -951,6 +953,54 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM attachments", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn fts_stays_in_sync_without_rebuild() {
+        // Migration 0017 installs triggers that keep messages_fts current for
+        // every writer; search must work with no rebuild_fts() call.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut writer = BatchWriter::new(tmp.path(), ResourceProfile::Low, 10).unwrap();
+        let msg = Message {
+            id: uuid::Uuid::new_v4(),
+            message_id: Some("fts-1".into()),
+            dedupe_hash: None,
+            timestamp: 42,
+            address: "+1555".into(),
+            body: "zanzibar meetup".into(),
+            body_searchable: "zanzibar meetup".into(),
+            message_type: MessageType::Sms,
+            direction: MessageDirection::Incoming,
+            thread_id: None,
+            attachments: Vec::new(),
+            contact_name: None,
+        };
+        writer.insert_batch(&[msg]).unwrap();
+
+        let hits: i64 = writer
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'zanzibar'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hits, 1);
+
+        // Deletes must also propagate (the 'delete' trigger).
+        writer
+            .conn
+            .execute("DELETE FROM messages WHERE message_id = 'fts-1'", [])
+            .unwrap();
+        let hits_after: i64 = writer
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'zanzibar'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hits_after, 0);
     }
 
     #[test]

@@ -23,8 +23,8 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-authors = ["Cole <cole@example.com>"]
-repository = "https://example.com/sms-archive"
+authors = ["Slagathore"]
+repository = "https://github.com/Slagathore/sms-archive"
 
 [workspace.dependencies]
 # Core async runtime
@@ -102,7 +102,6 @@ tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 
 # Image processing
 image = "0.24"
-img_hash = "3.2"
 libheif-rs = "1.0"
 ffmpeg-next = "7.0"
 nom-exif = "2.6"
