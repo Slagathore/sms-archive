@@ -126,13 +126,11 @@ impl BatchWriter {
              ON CONFLICT DO NOTHING",
         )?;
 
-        let mut find_by_hash_stmt = tx.prepare_cached(
-            "SELECT id FROM messages WHERE dedupe_hash = ?1 LIMIT 1",
-        )?;
+        let mut find_by_hash_stmt =
+            tx.prepare_cached("SELECT id FROM messages WHERE dedupe_hash = ?1 LIMIT 1")?;
 
-        let mut find_by_message_id_stmt = tx.prepare_cached(
-            "SELECT id FROM messages WHERE message_id = ?1 LIMIT 1",
-        )?;
+        let mut find_by_message_id_stmt =
+            tx.prepare_cached("SELECT id FROM messages WHERE message_id = ?1 LIMIT 1")?;
 
         let mut find_by_timestamp_address_stmt = tx.prepare_cached(
             "SELECT id FROM messages WHERE timestamp = ?1 AND address = ?2 LIMIT 1",
@@ -183,10 +181,9 @@ impl BatchWriter {
                         })
                         .or_else(|| {
                             find_by_timestamp_address_stmt
-                                .query_row(
-                                    params![msg.timestamp, msg.address],
-                                    |row| row.get::<_, String>(0),
-                                )
+                                .query_row(params![msg.timestamp, msg.address], |row| {
+                                    row.get::<_, String>(0)
+                                })
                                 .ok()
                         })
                 };
@@ -502,15 +499,17 @@ pub fn auto_create_contacts_from_messages(conn: &Connection) -> Result<AutoConta
     // Gather (address, latest_contact_name) pairs that need a contact.
     // Subquery picks the latest contact_name for each address (max timestamp wins).
     // We only emit addresses that don't already have a contact_addresses row.
-    let mut stmt = conn.prepare(
-        "SELECT m.address, \
+    let mut stmt = conn
+        .prepare(
+            "SELECT m.address, \
                 (SELECT contact_name FROM messages \
                  WHERE address = m.address AND contact_name IS NOT NULL \
                  ORDER BY timestamp DESC LIMIT 1) AS latest_name \
          FROM messages m \
          WHERE m.address NOT IN (SELECT address FROM contact_addresses) \
          GROUP BY m.address",
-    ).map_err(AppError::Database)?;
+        )
+        .map_err(AppError::Database)?;
 
     let rows: Vec<(String, Option<String>)> = stmt
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
@@ -578,7 +577,10 @@ pub fn auto_create_contacts_from_messages(conn: &Connection) -> Result<AutoConta
 /// flagged on first ingest).
 ///
 /// Returns the number of contacts marked stale.
-pub fn mark_contact_analytics_stale_since(conn: &Connection, since_unix_secs: i64) -> Result<usize> {
+pub fn mark_contact_analytics_stale_since(
+    conn: &Connection,
+    since_unix_secs: i64,
+) -> Result<usize> {
     // Seed missing status rows so freshly auto-created contacts have a record to flag.
     conn.execute(
         "INSERT OR IGNORE INTO contact_analytics_status (contact_id, last_computed_at, is_stale) \
@@ -588,8 +590,9 @@ pub fn mark_contact_analytics_stale_since(conn: &Connection, since_unix_secs: i6
     .map_err(AppError::Database)?;
 
     // Flag stale: any contact whose linked addresses received a message after the cutoff.
-    let updated = conn.execute(
-        "UPDATE contact_analytics_status \
+    let updated = conn
+        .execute(
+            "UPDATE contact_analytics_status \
          SET is_stale = 1 \
          WHERE contact_id IN ( \
              SELECT DISTINCT ca.contact_id \
@@ -597,9 +600,9 @@ pub fn mark_contact_analytics_stale_since(conn: &Connection, since_unix_secs: i6
              JOIN messages m ON m.address = ca.address \
              WHERE m.created_at >= ?1 \
          )",
-        params![since_unix_secs],
-    )
-    .map_err(AppError::Database)? as usize;
+            params![since_unix_secs],
+        )
+        .map_err(AppError::Database)? as usize;
 
     Ok(updated)
 }
@@ -711,11 +714,20 @@ fn run_migrations(conn: &Connection) -> Result<()> {
         (9, include_str!("../migrations/0009_message_direction.sql")),
         (10, include_str!("../migrations/0010_media_nsfw.sql")),
         (11, include_str!("../migrations/0011_media_embeddings.sql")),
-        (12, include_str!("../migrations/0012_attachment_gps_cache.sql")),
-        (13, include_str!("../migrations/0013_message_contact_name.sql")),
+        (
+            12,
+            include_str!("../migrations/0012_attachment_gps_cache.sql"),
+        ),
+        (
+            13,
+            include_str!("../migrations/0013_message_contact_name.sql"),
+        ),
         (14, include_str!("../migrations/0014_analytics_tables.sql")),
         (15, include_str!("../migrations/0015_contacts_source.sql")),
-        (16, include_str!("../migrations/0016_sentiment_and_jokes.sql")),
+        (
+            16,
+            include_str!("../migrations/0016_sentiment_and_jokes.sql"),
+        ),
     ];
     // #todo: add a post-migration backfill that infers message_direction from legacy fields if available.
 
@@ -1004,8 +1016,16 @@ mod tests {
             params!["att-1", "msg-2", "image/jpeg", "img.jpg", vec![0u8; 32]],
         )
         .unwrap();
-        insert_media_embedding(conn, "att-1", &model_id, 0, None, Some("caption"), &[0.2, 0.3])
-            .unwrap();
+        insert_media_embedding(
+            conn,
+            "att-1",
+            &model_id,
+            0,
+            None,
+            Some("caption"),
+            &[0.2, 0.3],
+        )
+        .unwrap();
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM media_embeddings", [], |r| r.get(0))
             .unwrap();
@@ -1054,7 +1074,11 @@ mod tests {
         let version: i64 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert!(version >= 15, "schema_version did not advance to >=15: got {}", version);
+        assert!(
+            version >= 15,
+            "schema_version did not advance to >=15: got {}",
+            version
+        );
     }
 
     #[test]
@@ -1146,6 +1170,10 @@ mod tests {
 
         // Cutoff at zero: every contact whose addresses received messages must be flagged.
         let stale_now = mark_contact_analytics_stale_since(conn, 0).unwrap();
-        assert!(stale_now >= 1, "expected at least one stale flag, got {}", stale_now);
+        assert!(
+            stale_now >= 1,
+            "expected at least one stale flag, got {}",
+            stale_now
+        );
     }
 }

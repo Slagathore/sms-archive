@@ -41,7 +41,6 @@ use crate::flow::{build_conversation_flow, SankeyData};
 use crate::focus::{compute_focus, FocusOutput};
 use crate::inside_jokes::{detect_inside_jokes, InsideJoke, InsideJokesConfig};
 use crate::insights::{compute_insights, EngineConfig, Insight, InsightCtx};
-use crate::sentiment::{compute_sentiment_timeline, SentimentTimeline};
 use crate::rating::{compute_rating, RatingInput, RatingOutput, RatingThresholds, RatingWeights};
 use crate::responses::{
     compute_response_metrics, ResponseConfig, ResponseHistogramJson, ResponseMessage,
@@ -49,6 +48,7 @@ use crate::responses::{
 };
 use crate::scoring::{compute_scoring, PointWeights, ScoringOutput};
 use crate::segmenter::segment_conversations;
+use crate::sentiment::{compute_sentiment_timeline, SentimentTimeline};
 use crate::topics::{build_phrase_counts, compute_topics, TopicPhrase, TopicsConfig};
 use crate::types::{Conversation, Participant, SegmentationConfig};
 use rusqlite::{params, Connection};
@@ -143,7 +143,11 @@ pub fn compute_for_contact(
     }
 
     // 2. Segment.
-    let mut conversations = segment_conversations(contact_id, &slim_message_refs(&messages), &config.segmentation);
+    let mut conversations = segment_conversations(
+        contact_id,
+        &slim_message_refs(&messages),
+        &config.segmentation,
+    );
 
     // 3. Aggregate counts + daily/hourly.
     let aggregates = compute_aggregates(&messages, config.tz_offset_secs, config.top_emoji_count);
@@ -210,7 +214,11 @@ pub fn compute_for_contact(
         last_message_ms: messages.last().map(|m| m.timestamp_ms).unwrap_or(0),
         avg_convo_length_msgs: pair.avg_convo_length_msgs,
     };
-    let rating = compute_rating(&rating_input, &config.rating_weights, &config.rating_thresholds);
+    let rating = compute_rating(
+        &rating_input,
+        &config.rating_weights,
+        &config.rating_thresholds,
+    );
 
     let insight_ctx = InsightCtx {
         contact: &aggregates.contact,
@@ -272,7 +280,10 @@ pub fn compute_for_contact(
 ///
 /// Attachments are loaded in a second query and merged into the per-message
 /// `mime_types` vec.
-fn load_messages_for_contact(conn: &Connection, contact_id: &str) -> Result<Vec<AggregatorMessage>> {
+fn load_messages_for_contact(
+    conn: &Connection,
+    contact_id: &str,
+) -> Result<Vec<AggregatorMessage>> {
     // Pass 1: messages.
     let mut stmt = conn
         .prepare(
@@ -287,7 +298,8 @@ fn load_messages_for_contact(conn: &Connection, contact_id: &str) -> Result<Vec<
         .map_err(AppError::Database)?;
 
     let mut messages: Vec<AggregatorMessage> = Vec::new();
-    let mut id_to_index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut id_to_index: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
 
     let rows = stmt
         .query_map(params![contact_id], |row| {
@@ -380,7 +392,9 @@ fn load_background_phrase_counts(
         )
         .map_err(AppError::Database)?;
     let rows: Vec<String> = stmt
-        .query_map(params![contact_id, BG_SAMPLE_LIMIT], |r| r.get::<_, String>(0))
+        .query_map(params![contact_id, BG_SAMPLE_LIMIT], |r| {
+            r.get::<_, String>(0)
+        })
         .map_err(AppError::Database)?
         .filter_map(|r| r.ok())
         .collect();
@@ -642,8 +656,9 @@ fn persist_all(
             .unwrap_or("{}".into());
         let insights_json = serde_json::to_string(insights).unwrap_or("[]".into());
         let flow_json = serde_json::to_string(flow).unwrap_or("{}".into());
-        let total_chars =
-            agg.my_character_count.saturating_add(agg.their_character_count);
+        let total_chars = agg
+            .my_character_count
+            .saturating_add(agg.their_character_count);
         let total_words = agg.my_word_count.saturating_add(agg.their_word_count);
         const HP1_CHARS: u64 = 440_000;
         let hp_equivalents = total_chars as f64 / HP1_CHARS as f64;
@@ -873,9 +888,9 @@ mod tests {
 
         // Three messages: Me opening, Them replying, Me replying.
         for (i, (ts_ms, dir, body)) in [
-            (1_000_000_000_000i64, 2, "hello there"),     // Me
-            (1_000_000_060_000i64, 1, "hi back!"),         // Them
-            (1_000_000_120_000i64, 2, "how are you?"),     // Me
+            (1_000_000_000_000i64, 2, "hello there"),  // Me
+            (1_000_000_060_000i64, 1, "hi back!"),     // Them
+            (1_000_000_120_000i64, 2, "how are you?"), // Me
         ]
         .iter()
         .enumerate()
@@ -998,7 +1013,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(convo_count_1, convo_count_2, "second run must replace, not append");
+        assert_eq!(
+            convo_count_1, convo_count_2,
+            "second run must replace, not append"
+        );
 
         // contact_analytics row count must be 1.
         let ca_count: i64 = conn

@@ -6,7 +6,7 @@ High-performance Rust desktop application for ingesting, indexing, searching, an
 
 - **Streaming XML ingest** — processes multi-GB XML exports without loading the entire file into memory
 - **SQLite + FTS5 search** — full-text search with Unicode normalization across all messages
-- **Media pipeline** — thumbnail generation, perceptual hashing, EXIF extraction, video keyframe extraction
+- **Media pipeline** — thumbnail generation, content hashing (exact-duplicate detection), EXIF extraction, video keyframe extraction
 - **Semantic search** — CLIP-based image and text embeddings for similarity search
 - **NSFW classification** — local ONNX-based classifier, no data leaves the machine
 - **AI assistant** — Ollama integration for on-device LLM chat over your archive
@@ -148,7 +148,13 @@ cargo run --bin sms -- export-attachments --db sms.db --format csv --output atta
 
 Additional filters: `--mime`, `--since`, `--address`, `--thread-id`, `--message-type`, `--address-like`, `--body-contains`
 
-### Tantivy Index (Optional)
+### Tantivy Index (Optional, currently broken)
+
+> **Status:** the Tantivy backend does not currently compile against the pinned
+> `tantivy 0.22` (the code targets an older API). The `tantivy-*` subcommands are
+> hidden unless the feature is enabled. FTS5 is the primary, fully supported
+> search backend; treat the commands below as aspirational until the backend is
+> fixed or removed.
 
 For high-performance full-text search using Tantivy (in addition to FTS5):
 
@@ -179,7 +185,7 @@ cargo run --bin sms -- datagen --output test.xml --size 0.01
 ## GUI App
 
 ```powershell
-cargo run --bin sms-app --release
+cargo run --bin sms-archive --release
 ```
 
 The GUI provides:
@@ -227,7 +233,7 @@ crates/
   db/             # SQLite schema, migrations, FTS5, query layer
   errors/         # Shared error types
   ingest/         # Streaming XML parser and import pipeline
-  media/          # Thumbnail generation, perceptual hashing, EXIF, HEIC, video
+  media/          # Thumbnail generation, content hashing, HEIC, video keyframes
   media_process/  # CLI media processing orchestration
   ml/             # ONNX Runtime wrappers (feature-gated)
   perf/           # Benchmarks (criterion)

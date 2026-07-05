@@ -367,7 +367,10 @@ fn finalize_post_ingest(db_path: &Path, ingest_start_unix_secs: i64) {
     let db = match sms_db::Database::open(db_path, profile) {
         Ok(db) => db,
         Err(err) => {
-            tracing::warn!(?err, "post-ingest: could not reopen database for finalization");
+            tracing::warn!(
+                ?err,
+                "post-ingest: could not reopen database for finalization"
+            );
             return;
         }
     };
@@ -392,7 +395,10 @@ fn finalize_post_ingest(db_path: &Path, ingest_start_unix_secs: i64) {
     match sms_db::mark_contact_analytics_stale_since(conn, ingest_start_unix_secs) {
         Ok(count) => {
             if count > 0 {
-                tracing::info!(stale_marked = count, "post-ingest: marked contact analytics stale");
+                tracing::info!(
+                    stale_marked = count,
+                    "post-ingest: marked contact analytics stale"
+                );
             }
         }
         Err(err) => {
@@ -707,10 +713,7 @@ fn maybe_log_parse_metrics(metrics: &mut ParseMetrics, stats: &ParseStats) {
 
 fn check_control(progress: &Option<Arc<IngestProgress>>) -> Result<()> {
     if let Some(progress) = progress {
-        if progress
-            .skip_current_file
-            .swap(false, Ordering::Relaxed)
-        {
+        if progress.skip_current_file.swap(false, Ordering::Relaxed) {
             record_skipped_file(progress, "Skipped by user");
             return Err(AppError::SkippedFile);
         }
@@ -746,7 +749,11 @@ fn update_progress(
     }
 }
 
-fn record_parse_error(progress: &Option<Arc<IngestProgress>>, offset: u64, err: &dyn std::fmt::Display) {
+fn record_parse_error(
+    progress: &Option<Arc<IngestProgress>>,
+    offset: u64,
+    err: &dyn std::fmt::Display,
+) {
     if let Some(progress) = progress {
         if let Ok(mut lock) = progress.error_samples.lock() {
             if lock.len() < 50 {
@@ -771,14 +778,9 @@ fn record_skipped_file(progress: &Arc<IngestProgress>, reason: &str) {
     }
 }
 
-fn record_skipped_attachment(
-    progress: &Option<Arc<IngestProgress>>,
-    label: &str,
-) {
+fn record_skipped_attachment(progress: &Option<Arc<IngestProgress>>, label: &str) {
     if let Some(progress) = progress {
-        progress
-            .attachments_skipped
-            .fetch_add(1, Ordering::Relaxed);
+        progress.attachments_skipped.fetch_add(1, Ordering::Relaxed);
         if let Ok(mut lock) = progress.skipped_samples.lock() {
             if lock.len() < 100 {
                 lock.push(label.to_string());
@@ -955,10 +957,7 @@ fn parse_parallel_boundaries(
         stats.messages_seen = scanned as u64;
     }
     if let Some(progress) = &progress {
-        if progress
-            .skip_current_file
-            .swap(false, Ordering::Relaxed)
-        {
+        if progress.skip_current_file.swap(false, Ordering::Relaxed) {
             record_skipped_file(progress, "Skipped by user");
             return Err(AppError::SkippedFile);
         }
@@ -1194,7 +1193,7 @@ fn parse_mms_block<R: std::io::BufRead>(
                             media_dir,
                             thumbnail_size,
                             thumb_queue.clone(),
-                                progress.clone(),
+                            progress.clone(),
                         )?;
                     }
                 } else if e.name().as_ref() == b"mms" {
@@ -1327,8 +1326,7 @@ fn handle_part(
         thumbnail_size,
         thumb_queue,
         progress,
-    )?
-    {
+    )? {
         msg.attachments.push(att);
     }
 
@@ -1377,10 +1375,7 @@ fn materialize_attachment(
                 }
             }
         } else {
-            skip_reason = Some(format!(
-                "attachment: path not found for '{}'",
-                d
-            ));
+            skip_reason = Some(format!("attachment: path not found for '{}'", d));
             None
         }
     } else if let Some(n) = name.clone() {
@@ -1397,10 +1392,7 @@ fn materialize_attachment(
                 }
             }
         } else {
-            skip_reason = Some(format!(
-                "attachment: path not found for '{}'",
-                n
-            ));
+            skip_reason = Some(format!("attachment: path not found for '{}'", n));
             None
         }
     } else {
@@ -1911,7 +1903,9 @@ mod tests {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(Event::Start(e)) if e.name().as_ref() == b"mms" => {
-                    parsed = Some(parse_mms_block(&mut reader, &e, None, None, 256, None, None).unwrap());
+                    parsed = Some(
+                        parse_mms_block(&mut reader, &e, None, None, 256, None, None).unwrap(),
+                    );
                     break;
                 }
                 Ok(Event::Eof) => break,
@@ -1935,8 +1929,16 @@ mod tests {
             match reader.read_event_into(&mut buf) {
                 Ok(Event::Start(e)) if e.name().as_ref() == b"mms" => {
                     parsed = Some(
-                        parse_mms_block(&mut reader, &e, None, Some(media_dir.path()), 64, None, None)
-                            .unwrap(),
+                        parse_mms_block(
+                            &mut reader,
+                            &e,
+                            None,
+                            Some(media_dir.path()),
+                            64,
+                            None,
+                            None,
+                        )
+                        .unwrap(),
                     );
                     break;
                 }

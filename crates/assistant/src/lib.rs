@@ -86,4 +86,3 @@ fn parse_tool_call(call: &Value) -> Result<(String, Value)> {
     };
     Ok((name.to_string(), args))
 }
-

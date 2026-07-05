@@ -70,11 +70,11 @@ pub struct ResponseConfig {
 impl Default for ResponseConfig {
     fn default() -> Self {
         Self {
-            rapid_response_threshold_ms: 60 * 1000,                  // 60 seconds
+            rapid_response_threshold_ms: 60 * 1000, // 60 seconds
             overnight_start_hour: 23,
             overnight_end_hour: 7,
-            overnight_force_gap_ms: 8 * 60 * 60 * 1000,              // 8 hours
-            overnight_evening_gap_ms: 4 * 60 * 60 * 1000,            // 4 hours
+            overnight_force_gap_ms: 8 * 60 * 60 * 1000, // 8 hours
+            overnight_evening_gap_ms: 4 * 60 * 60 * 1000, // 4 hours
         }
     }
 }
@@ -119,28 +119,20 @@ pub struct ResponseMetrics {
 /// 8 buckets total: [0, 30s), [30s, 1m), [1m, 5m), [5m, 15m), [15m, 1h),
 /// [1h, 6h), [6h, 24h), [24h, +∞).
 const HIST_BOUNDS_MS: [i64; 8] = [
-    30_000,            // 30 seconds
-    60_000,            // 1 minute
-    300_000,           // 5 minutes
-    900_000,           // 15 minutes
-    3_600_000,         // 1 hour
-    21_600_000,        // 6 hours
-    86_400_000,        // 24 hours
+    30_000,     // 30 seconds
+    60_000,     // 1 minute
+    300_000,    // 5 minutes
+    900_000,    // 15 minutes
+    3_600_000,  // 1 hour
+    21_600_000, // 6 hours
+    86_400_000, // 24 hours
     i64::MAX,
 ];
 
 /// Bucket labels (for documentation / future debugging UIs). Index-aligned
 /// with `HIST_BOUNDS_MS`.
-pub const HIST_BUCKET_LABELS: [&str; 8] = [
-    "<30s",
-    "<1m",
-    "<5m",
-    "<15m",
-    "<1h",
-    "<6h",
-    "<24h",
-    "≥24h",
-];
+pub const HIST_BUCKET_LABELS: [&str; 8] =
+    ["<30s", "<1m", "<5m", "<15m", "<1h", "<6h", "<24h", "≥24h"];
 
 /// Run the response calculator over a contact's full message stream.
 ///
@@ -319,7 +311,11 @@ fn is_overnight_response(
         chrono::LocalResult::Single(dt) => dt.hour() as u8,
         _ => return false,
     };
-    hour_in_overnight_window(prev_hour, config.overnight_start_hour, config.overnight_end_hour)
+    hour_in_overnight_window(
+        prev_hour,
+        config.overnight_start_hour,
+        config.overnight_end_hour,
+    )
 }
 
 /// Whether a clock hour falls inside `[start, end)` taken cyclically over
@@ -462,7 +458,7 @@ mod tests {
         assert!(hour_in_overnight_window(0, 23, 7));
         assert!(hour_in_overnight_window(3, 23, 7));
         assert!(hour_in_overnight_window(6, 23, 7));
-        assert!(!hour_in_overnight_window(7, 23, 7));   // end is exclusive
+        assert!(!hour_in_overnight_window(7, 23, 7)); // end is exclusive
         assert!(!hour_in_overnight_window(12, 23, 7));
         assert!(!hour_in_overnight_window(22, 23, 7));
     }
@@ -498,9 +494,9 @@ mod tests {
     #[test]
     fn basic_back_and_forth_one_response_each_side() {
         let messages = vec![
-            r(0, Participant::Them),                 // they open
-            r(60_000, Participant::Me),              // I reply (60s)
-            r(120_000, Participant::Them),           // they reply (60s)
+            r(0, Participant::Them),       // they open
+            r(60_000, Participant::Me),    // I reply (60s)
+            r(120_000, Participant::Them), // they reply (60s)
         ];
         let metrics = compute_response_metrics(&messages, &cfg(), &seg(), 0);
         assert_eq!(metrics.my_median_response_ms, Some(60_000));
@@ -514,10 +510,10 @@ mod tests {
     #[test]
     fn double_messages_excluded_from_response_pairs() {
         let messages = vec![
-            r(0, Participant::Me),                   // I open
-            r(30_000, Participant::Me),              // I send another (double)
-            r(60_000, Participant::Me),              // I send another (double)
-            r(90_000, Participant::Them),            // they reply (90s from my last)
+            r(0, Participant::Me),        // I open
+            r(30_000, Participant::Me),   // I send another (double)
+            r(60_000, Participant::Me),   // I send another (double)
+            r(90_000, Participant::Them), // they reply (90s from my last)
         ];
         let metrics = compute_response_metrics(&messages, &cfg(), &seg(), 0);
         // Two doubles from me (msg 2 and 3 are after msg 1 and 2 with same sender).
@@ -533,11 +529,11 @@ mod tests {
         // Their: 30s (rapid), 90s (not), 10s (rapid). Mine: empty.
         let messages = vec![
             r(0, Participant::Me),
-            r(30_000, Participant::Them),            // 30s rapid (≤60s default)
-            r(120_000, Participant::Me),             // 90s
-            r(210_000, Participant::Them),           // 90s NOT rapid
-            r(220_000, Participant::Me),             // 10s
-            r(230_000, Participant::Them),           // 10s rapid
+            r(30_000, Participant::Them),  // 30s rapid (≤60s default)
+            r(120_000, Participant::Me),   // 90s
+            r(210_000, Participant::Them), // 90s NOT rapid
+            r(220_000, Participant::Me),   // 10s
+            r(230_000, Participant::Them), // 10s rapid
         ];
         let metrics = compute_response_metrics(&messages, &cfg(), &seg(), 0);
         // Their responses: 30s (yes), 90s (no), 10s (yes) → 2/3 rapid.
@@ -553,9 +549,9 @@ mod tests {
         // their "first response".
         let messages = vec![
             r(0, Participant::Me),
-            r(60_000, Participant::Them),            // their first response (60s)
+            r(60_000, Participant::Them), // their first response (60s)
             r(120_000, Participant::Me),
-            r(180_000, Participant::Them),           // not "first"
+            r(180_000, Participant::Them), // not "first"
         ];
         let metrics = compute_response_metrics(&messages, &cfg(), &seg(), 0);
         // Their first responses (in convos where I opened): just 60s.
@@ -572,8 +568,8 @@ mod tests {
             r(0, Participant::Me),
             r(60_000, Participant::Them),
             // Big gap → new convo
-            r(timeout + 1_000_000, Participant::Them),  // they open this one
-            r(timeout + 1_120_000, Participant::Me),    // my first response (120s)
+            r(timeout + 1_000_000, Participant::Them), // they open this one
+            r(timeout + 1_120_000, Participant::Me),   // my first response (120s)
         ];
         let metrics = compute_response_metrics(&messages, &cfg(), &seg(), 0);
         // Their first response in convo 1: 60s.
@@ -590,12 +586,15 @@ mod tests {
         let mut long_seg = seg();
         long_seg.conversation_timeout_ms = 24 * 60 * 60 * 1000;
         let messages = vec![
-            r(0, Participant::Me),                       // 1970-01-01T00:00:00Z; offset 0 → 0:00 local
-            r(9 * 60 * 60 * 1000, Participant::Them),    // 9h later → 9am local
+            r(0, Participant::Me), // 1970-01-01T00:00:00Z; offset 0 → 0:00 local
+            r(9 * 60 * 60 * 1000, Participant::Them), // 9h later → 9am local
         ];
         let metrics = compute_response_metrics(&messages, &cfg(), &long_seg, 0);
         // 9h ≥ force_gap_ms (8h), so this is overnight regardless of clock time.
-        assert_eq!(metrics.their_median_response_overnight_ms, Some(9 * 60 * 60 * 1000));
+        assert_eq!(
+            metrics.their_median_response_overnight_ms,
+            Some(9 * 60 * 60 * 1000)
+        );
         assert!(metrics.their_median_response_awake_ms.is_none());
     }
 
@@ -608,11 +607,14 @@ mod tests {
 
         // Prev at unix 0, +0 offset → 1970-01-01T00:00 local (hour 0). 0 IS in [23,7) overnight window.
         let messages = vec![
-            r(0, Participant::Me),                       // hour 0 local — in overnight window
-            r(5 * 60 * 60 * 1000, Participant::Them),    // 5h later
+            r(0, Participant::Me),                    // hour 0 local — in overnight window
+            r(5 * 60 * 60 * 1000, Participant::Them), // 5h later
         ];
         let metrics = compute_response_metrics(&messages, &cfg(), &long_seg, 0);
-        assert_eq!(metrics.their_median_response_overnight_ms, Some(5 * 60 * 60 * 1000));
+        assert_eq!(
+            metrics.their_median_response_overnight_ms,
+            Some(5 * 60 * 60 * 1000)
+        );
     }
 
     #[test]
@@ -621,13 +623,16 @@ mod tests {
         // and 13 is not in [23, 7) → awake.
         let mut long_seg = seg();
         long_seg.conversation_timeout_ms = 12 * 60 * 60 * 1000;
-        let prev_ts: i64 = 13 * 60 * 60 * 1000;          // 13:00 UTC, +0 offset → 13:00 local
+        let prev_ts: i64 = 13 * 60 * 60 * 1000; // 13:00 UTC, +0 offset → 13:00 local
         let messages = vec![
             r(prev_ts, Participant::Me),
-            r(prev_ts + 5 * 60 * 60 * 1000, Participant::Them),   // 5h later (18:00 local)
+            r(prev_ts + 5 * 60 * 60 * 1000, Participant::Them), // 5h later (18:00 local)
         ];
         let metrics = compute_response_metrics(&messages, &cfg(), &long_seg, 0);
-        assert_eq!(metrics.their_median_response_awake_ms, Some(5 * 60 * 60 * 1000));
+        assert_eq!(
+            metrics.their_median_response_awake_ms,
+            Some(5 * 60 * 60 * 1000)
+        );
         assert!(metrics.their_median_response_overnight_ms.is_none());
     }
 
@@ -635,10 +640,10 @@ mod tests {
     fn rapid_response_is_never_overnight() {
         // 2-min gap, prev at 23:30 local — in overnight window but gap is way
         // under the evening threshold, so awake.
-        let prev_ts: i64 = 23 * 60 * 60 * 1000 + 30 * 60 * 1000;  // 23:30
+        let prev_ts: i64 = 23 * 60 * 60 * 1000 + 30 * 60 * 1000; // 23:30
         let messages = vec![
             r(prev_ts, Participant::Me),
-            r(prev_ts + 2 * 60 * 1000, Participant::Them),         // 2 min later
+            r(prev_ts + 2 * 60 * 1000, Participant::Them), // 2 min later
         ];
         let metrics = compute_response_metrics(&messages, &cfg(), &seg(), 0);
         assert_eq!(metrics.their_median_response_awake_ms, Some(2 * 60 * 1000));
@@ -653,10 +658,10 @@ mod tests {
 
         let messages = vec![
             r(0, Participant::Me),
-            r(5_000, Participant::Them),                 // 5s → bucket 0 (<30s)
-            r(60_000, Participant::Me),                  // 55s → bucket 1 (<1m)
-            r(60_000 + 120_000, Participant::Them),      // 2m → bucket 2 (<5m)
-            r(60_000 + 120_000 + 600_000, Participant::Me),  // 10m → bucket 3 (<15m)
+            r(5_000, Participant::Them), // 5s → bucket 0 (<30s)
+            r(60_000, Participant::Me),  // 55s → bucket 1 (<1m)
+            r(60_000 + 120_000, Participant::Them), // 2m → bucket 2 (<5m)
+            r(60_000 + 120_000 + 600_000, Participant::Me), // 10m → bucket 3 (<15m)
         ];
         let metrics = compute_response_metrics(&messages, &cfg(), &long_seg, 0);
         // Their bucket counts: 1 in bucket 0 (5s), 1 in bucket 2 (2m).
@@ -706,6 +711,10 @@ mod tests {
         let med = metrics.their_median_response_ms.unwrap();
         let mean = metrics.their_mean_response_ms.unwrap();
         assert!(med < 5 * 60 * 1000, "median ({}) should be near 60s", med);
-        assert!(mean > 5 * 60 * 1000, "mean ({}) should be pulled by outlier", mean);
+        assert!(
+            mean > 5 * 60 * 1000,
+            "mean ({}) should be pulled by outlier",
+            mean
+        );
     }
 }

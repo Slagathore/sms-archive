@@ -22,7 +22,10 @@ use std::sync::LazyLock;
 // we don't anchor with \b.
 // =========================================================================
 static LAUGH_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(l(?:o)+l|lmao|lmfao|rofl|ha(?:ha)+|he(?:he)+)\b|[\u{1F602}\u{1F923}\u{1F480}]").unwrap()
+    Regex::new(
+        r"(?i)\b(l(?:o)+l|lmao|lmfao|rofl|ha(?:ha)+|he(?:he)+)\b|[\u{1F602}\u{1F923}\u{1F480}]",
+    )
+    .unwrap()
 });
 
 pub fn is_laugh(body: &str) -> bool {
@@ -80,9 +83,8 @@ pub fn is_encouragement(body: &str) -> bool {
 // that happens to be a sentence ending. We only fire on http/https/www
 // prefixes — strict but defensible.
 // =========================================================================
-static LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(?:https?://|www\.)\S+").unwrap()
-});
+static LINK_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(?:https?://|www\.)\S+").unwrap());
 
 pub fn contains_link(body: &str) -> bool {
     LINK_RE.is_match(body)
@@ -112,10 +114,10 @@ mod tests {
     #[test]
     fn laughs_does_not_match_random_text() {
         assert!(!is_laugh("hello"));
-        assert!(!is_laugh("solo trip"));    // contains "lo" but not "lol"
-        assert!(!is_laugh("ha"));           // single "ha" — not enough
+        assert!(!is_laugh("solo trip")); // contains "lo" but not "lol"
+        assert!(!is_laugh("ha")); // single "ha" — not enough
         assert!(!is_laugh(""));
-        assert!(!is_laugh("rolling"));      // contains "rol" but not "rofl"
+        assert!(!is_laugh("rolling")); // contains "rol" but not "rofl"
     }
 
     // ---------- apologies ----------
@@ -143,13 +145,13 @@ mod tests {
     fn questions_match_trailing_question_mark() {
         assert!(is_question("are you there?"));
         assert!(is_question("what?"));
-        assert!(is_question("really?  "));   // trailing whitespace OK
+        assert!(is_question("really?  ")); // trailing whitespace OK
     }
 
     #[test]
     fn questions_do_not_match_without_trailing_qm() {
         assert!(!is_question("are you there"));
-        assert!(!is_question("?what"));      // ? not at end
+        assert!(!is_question("?what")); // ? not at end
         assert!(!is_question(""));
     }
 
@@ -172,7 +174,7 @@ mod tests {
     #[test]
     fn encouragement_does_not_match_neutral_text() {
         assert!(!is_encouragement("ok"));
-        assert!(!is_encouragement("amazing weather"));   // "amazing" alone isn't enough
+        assert!(!is_encouragement("amazing weather")); // "amazing" alone isn't enough
     }
 
     // ---------- links ----------
@@ -187,7 +189,7 @@ mod tests {
     #[test]
     fn links_does_not_match_bare_tld() {
         assert!(!contains_link("just google it"));
-        assert!(!contains_link("foo.com without prefix"));   // strict by design
+        assert!(!contains_link("foo.com without prefix")); // strict by design
         assert!(!contains_link(""));
     }
 }

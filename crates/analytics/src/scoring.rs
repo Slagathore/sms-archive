@@ -239,7 +239,13 @@ mod tests {
         PointWeights::default()
     }
 
-    fn am(rowid: i64, ts_ms: i64, sender: Participant, body: &str, mimes: &[&str]) -> AggregatorMessage {
+    fn am(
+        rowid: i64,
+        ts_ms: i64,
+        sender: Participant,
+        body: &str,
+        mimes: &[&str],
+    ) -> AggregatorMessage {
         AggregatorMessage {
             db_rowid: rowid,
             timestamp_ms: ts_ms,
@@ -266,7 +272,11 @@ mod tests {
             }
         }
         let total = my + them;
-        let major = if my >= them { Participant::Me } else { Participant::Them };
+        let major = if my >= them {
+            Participant::Me
+        } else {
+            Participant::Them
+        };
         vec![Conversation {
             contact_id: "c1".to_string(),
             start_time_ms: first.timestamp_ms,
@@ -318,7 +328,9 @@ mod tests {
         let expected = 1.0 + 0.1 * (3.0_f64).ln() + 5.0;
         assert!(
             (out.per_message_points[0] - expected).abs() < 1e-9,
-            "got {}, expected ~{}", out.per_message_points[0], expected
+            "got {}, expected ~{}",
+            out.per_message_points[0],
+            expected
         );
         assert_eq!(out.total_my_points, out.per_message_points[0]);
         assert_eq!(out.total_their_points, 0.0);
@@ -329,8 +341,8 @@ mod tests {
     fn rapid_response_bonus_only_when_within_threshold_and_flipped() {
         let messages = vec![
             am(1, 1_000_000, Participant::Me, "ping", &[]),
-            am(2, 1_030_000, Participant::Them, "pong", &[]),     // 30s flip → rapid
-            am(3, 1_120_000, Participant::Me, "ok", &[]),         // 90s flip → NOT rapid (>60s)
+            am(2, 1_030_000, Participant::Them, "pong", &[]), // 30s flip → rapid
+            am(3, 1_120_000, Participant::Me, "ok", &[]),     // 90s flip → NOT rapid (>60s)
         ];
         let convs = one_convo_for(&messages);
         let out = compute_scoring(
@@ -346,13 +358,17 @@ mod tests {
         let their_expected = 1.0 + 0.1 * (2.0_f64).ln() + 2.0;
         assert!(
             (out.per_message_points[1] - their_expected).abs() < 1e-9,
-            "their msg pts: got {}, expected ~{}", out.per_message_points[1], their_expected
+            "their msg pts: got {}, expected ~{}",
+            out.per_message_points[1],
+            their_expected
         );
         // My second msg pts = 1.0 + 0.1*ln(2) + 0 (not rapid)
         let mine_expected = 1.0 + 0.1 * (2.0_f64).ln();
         assert!(
             (out.per_message_points[2] - mine_expected).abs() < 1e-9,
-            "mine msg pts: got {}, expected ~{}", out.per_message_points[2], mine_expected
+            "mine msg pts: got {}, expected ~{}",
+            out.per_message_points[2],
+            mine_expected
         );
     }
 
@@ -360,7 +376,7 @@ mod tests {
     fn double_message_does_not_get_rapid_bonus() {
         let messages = vec![
             am(1, 1_000_000, Participant::Me, "first", &[]),
-            am(2, 1_010_000, Participant::Me, "second", &[]),    // same sender, no rapid
+            am(2, 1_010_000, Participant::Me, "second", &[]), // same sender, no rapid
         ];
         let convs = one_convo_for(&messages);
         let out = compute_scoring(
@@ -372,10 +388,12 @@ mod tests {
             0,
         );
         // Second msg should NOT have rapid bonus.
-        let expected_second = 1.0 + 0.1 * (2.0_f64).ln();    // 1 word, no rapid
+        let expected_second = 1.0 + 0.1 * (2.0_f64).ln(); // 1 word, no rapid
         assert!(
             (out.per_message_points[1] - expected_second).abs() < 1e-9,
-            "got {}, expected ~{}", out.per_message_points[1], expected_second
+            "got {}, expected ~{}",
+            out.per_message_points[1],
+            expected_second
         );
     }
 
@@ -403,7 +421,7 @@ mod tests {
         );
         // 11 whitespace-delimited tokens.
         let words = body.split_whitespace().count() as f64;
-        let emoji_count = 1.0;    // 😂
+        let emoji_count = 1.0; // 😂
         let expected = 1.0
             + 0.1 * (words + 1.0).ln()
             + 0.2 * emoji_count
@@ -413,10 +431,12 @@ mod tests {
             + 2.0    // link (https://...)
             + 3.0    // image
             + 5.0    // video
-            + 5.0;   // started_convo
+            + 5.0; // started_convo
         assert!(
             (out.per_message_points[0] - expected).abs() < 1e-9,
-            "got {}, expected ~{}", out.per_message_points[0], expected
+            "got {}, expected ~{}",
+            out.per_message_points[0],
+            expected
         );
     }
 
@@ -500,16 +520,24 @@ mod tests {
             &weights(),
             60_000,
             &SegmentationConfig::default(),
-            6 * 3600,    // UTC+6
+            6 * 3600, // UTC+6
         );
         // Two distinct local days.
         assert_eq!(out.daily_points.len(), 2);
         let day_21 = out.daily_points.get("2024-03-21").expect("missing 03-21");
         let day_22 = out.daily_points.get("2024-03-22").expect("missing 03-22");
         // 03-21 has Their msg → second tuple field non-zero.
-        assert!(day_21.0 == 0.0 && day_21.1 > 0.0, "03-21 expected (0, >0), got {:?}", day_21);
+        assert!(
+            day_21.0 == 0.0 && day_21.1 > 0.0,
+            "03-21 expected (0, >0), got {:?}",
+            day_21
+        );
         // 03-22 has My msg → first tuple field non-zero.
-        assert!(day_22.0 > 0.0 && day_22.1 == 0.0, "03-22 expected (>0, 0), got {:?}", day_22);
+        assert!(
+            day_22.0 > 0.0 && day_22.1 == 0.0,
+            "03-22 expected (>0, 0), got {:?}",
+            day_22
+        );
     }
 
     #[test]
@@ -525,7 +553,15 @@ mod tests {
         let words_only_long = p_long - 1.0;
         // long / short should be much less than 10× (closer to ln(501)/ln(51) ≈ 1.58)
         let ratio = words_only_long / words_only_short;
-        assert!(ratio < 3.0, "log-scale word ratio should be <3×, got {}", ratio);
-        assert!(ratio > 1.0, "longer message should still score higher, got ratio {}", ratio);
+        assert!(
+            ratio < 3.0,
+            "log-scale word ratio should be <3×, got {}",
+            ratio
+        );
+        assert!(
+            ratio > 1.0,
+            "longer message should still score higher, got ratio {}",
+            ratio
+        );
     }
 }

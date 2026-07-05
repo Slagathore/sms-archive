@@ -91,13 +91,13 @@ pub struct SegmentationConfig {
 impl Default for SegmentationConfig {
     fn default() -> Self {
         Self {
-            conversation_timeout_ms: 4 * 60 * 60 * 1000,    // 4 hours
+            conversation_timeout_ms: 4 * 60 * 60 * 1000, // 4 hours
             big_moment_static_threshold: 20,
             big_moment_dynamic_percentile: 90,
             big_moment_dynamic_floor: 10,
-            reconnect_tier1_ms: 24 * 60 * 60 * 1000,        // 24h
-            reconnect_tier2_ms: 7 * 24 * 60 * 60 * 1000,    // 7d
-            reconnect_tier3_ms: 30 * 24 * 60 * 60 * 1000,   // 30d
+            reconnect_tier1_ms: 24 * 60 * 60 * 1000, // 24h
+            reconnect_tier2_ms: 7 * 24 * 60 * 60 * 1000, // 7d
+            reconnect_tier3_ms: 30 * 24 * 60 * 60 * 1000, // 30d
             reconnect_tier4_multiplier: 3.0,
         }
     }

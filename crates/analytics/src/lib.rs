@@ -57,8 +57,6 @@ pub use emoji::{extract_emojis, top_emojis, EmojiCount};
 pub use flow::{build_conversation_flow, SankeyData, SankeyLink, SankeyNode};
 pub use focus::{compute_focus, FocusOutput};
 pub use inside_jokes::{detect_inside_jokes, InsideJoke, InsideJokesConfig};
-pub use sentiment::{compute_sentiment_timeline, SentimentDay, SentimentTimeline};
-pub use topics::{build_phrase_counts, compute_topics, TopicPhrase, TopicsConfig};
 pub use insights::{
     chi_square_2x2, compute_insights, Confidence, EngineConfig, Insight, InsightCategory,
     InsightCtx,
@@ -75,4 +73,6 @@ pub use responses::{
 };
 pub use scoring::{compute_message_points, compute_scoring, PointWeights, ScoringOutput};
 pub use segmenter::segment_conversations;
+pub use sentiment::{compute_sentiment_timeline, SentimentDay, SentimentTimeline};
+pub use topics::{build_phrase_counts, compute_topics, TopicPhrase, TopicsConfig};
 pub use types::{Conversation, MessageRef, Participant, SegmentationConfig};

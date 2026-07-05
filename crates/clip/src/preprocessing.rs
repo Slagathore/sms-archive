@@ -38,7 +38,8 @@ pub fn clip_preprocess_batch(
         let scale = (size as f32 / width as f32).max(size as f32 / height as f32);
         let new_w = (width as f32 * scale).round().max(1.0) as u32;
         let new_h = (height as f32 * scale).round().max(1.0) as u32;
-        let resized = image::imageops::resize(&rgb, new_w, new_h, image::imageops::FilterType::Lanczos3);
+        let resized =
+            image::imageops::resize(&rgb, new_w, new_h, image::imageops::FilterType::Lanczos3);
 
         let x = (new_w.saturating_sub(size)) / 2;
         let y = (new_h.saturating_sub(size)) / 2;

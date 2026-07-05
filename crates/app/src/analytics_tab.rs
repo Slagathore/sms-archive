@@ -529,28 +529,39 @@ fn render_contact_list(app: &mut SmsArchiveApp, ui: &mut egui::Ui) {
         .id_source("analytics_contact_list")
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.add_sized([260.0, 18.0], egui::Label::new(egui::RichText::new("Contact").strong()));
-                ui.add_sized([100.0, 18.0], egui::Label::new(egui::RichText::new("Messages").strong()));
-                ui.add_sized([80.0, 18.0], egui::Label::new(egui::RichText::new("Source").strong()));
+                ui.add_sized(
+                    [260.0, 18.0],
+                    egui::Label::new(egui::RichText::new("Contact").strong()),
+                );
+                ui.add_sized(
+                    [100.0, 18.0],
+                    egui::Label::new(egui::RichText::new("Messages").strong()),
+                );
+                ui.add_sized(
+                    [80.0, 18.0],
+                    egui::Label::new(egui::RichText::new("Source").strong()),
+                );
             });
             ui.separator();
             for idx in filtered_indices {
                 let row = &app.analytics.contacts[idx];
-                let selected = app.analytics.selected_contact_id.as_deref() == Some(row.contact_id.as_str());
+                let selected =
+                    app.analytics.selected_contact_id.as_deref() == Some(row.contact_id.as_str());
                 let label = if row.display_name == row.primary_address {
                     row.display_name.clone()
                 } else {
                     format!("{}  ({})", row.display_name, row.primary_address)
                 };
                 ui.horizontal(|ui| {
-                    let resp = ui.add_sized(
-                        [260.0, 22.0],
-                        egui::SelectableLabel::new(selected, label),
-                    );
+                    let resp =
+                        ui.add_sized([260.0, 22.0], egui::SelectableLabel::new(selected, label));
                     if resp.clicked() {
                         app.analytics.selected_contact_id = Some(row.contact_id.clone());
                     }
-                    ui.add_sized([100.0, 22.0], egui::Label::new(format!("{}", row.message_count)));
+                    ui.add_sized(
+                        [100.0, 22.0],
+                        egui::Label::new(format!("{}", row.message_count)),
+                    );
                     ui.add_sized([80.0, 22.0], egui::Label::new(row.source.clone()));
                 });
             }
@@ -611,14 +622,20 @@ fn render_cache_status_line(app: &mut SmsArchiveApp, ui: &mut egui::Ui) {
     if loaded.is_stale {
         ui.colored_label(
             egui::Color32::from_rgb(220, 150, 0),
-            format!("⚠ Cache is stale (last computed {} — re-run to refresh)", when),
+            format!(
+                "⚠ Cache is stale (last computed {} — re-run to refresh)",
+                when
+            ),
         );
     } else {
         let ms_str = loaded
             .last_compute_ms
             .map(|ms| format!(" — last run took {} ms", ms))
             .unwrap_or_default();
-        ui.label(format!("Cache status: ✅ fresh, computed {}{}", when, ms_str));
+        ui.label(format!(
+            "Cache status: ✅ fresh, computed {}{}",
+            when, ms_str
+        ));
     }
     if let Some(err) = &loaded.last_error {
         ui.colored_label(
@@ -641,10 +658,7 @@ fn render_run_analysis_controls(app: &mut SmsArchiveApp, ui: &mut egui::Ui, cont
         } else {
             "▶  Run Analysis"
         };
-        if ui
-            .add_enabled(!running, egui::Button::new(label))
-            .clicked()
-        {
+        if ui.add_enabled(!running, egui::Button::new(label)).clicked() {
             spawn_compute(app, contact_id);
         }
         ui.label("TZ offset (s):");
@@ -656,8 +670,12 @@ fn render_run_analysis_controls(app: &mut SmsArchiveApp, ui: &mut egui::Ui, cont
         }
 
         // Export button — only available once analytics are loaded.
-        let export_enabled =
-            !running && app.analytics.loaded.as_ref().is_some_and(|l| l.last_computed_at > 0);
+        let export_enabled = !running
+            && app
+                .analytics
+                .loaded
+                .as_ref()
+                .is_some_and(|l| l.last_computed_at > 0);
         if ui
             .add_enabled(export_enabled, egui::Button::new("📄 Export HTML"))
             .clicked()
@@ -706,8 +724,7 @@ fn export_html_report(app: &mut SmsArchiveApp, contact_id: &str) {
     let html = build_html_report(&display_name, loaded);
     match std::fs::write(&path, html) {
         Ok(()) => {
-            app.analytics.compute_status_msg =
-                format!("Exported to {}", path.display());
+            app.analytics.compute_status_msg = format!("Exported to {}", path.display());
         }
         Err(e) => {
             app.analytics.compute_status_msg = format!("Export failed: {}", e);
@@ -751,10 +768,16 @@ fn build_html_report(display_name: &str, l: &LoadedAnalytics) -> String {
         _ => "—".into(),
     };
     html.push_str("<div class=\"kpis\">\n");
-    html.push_str(&kpi_html("Chat Points", &format_with_commas((l.my_points + l.their_points).round() as i64)));
+    html.push_str(&kpi_html(
+        "Chat Points",
+        &format_with_commas((l.my_points + l.their_points).round() as i64),
+    ));
     html.push_str(&kpi_html("Time Period", &span_label));
     html.push_str(&kpi_html("Messages", &format_with_commas(total_msgs)));
-    html.push_str(&kpi_html("Conversations", &format_with_commas(l.total_conversations)));
+    html.push_str(&kpi_html(
+        "Conversations",
+        &format_with_commas(l.total_conversations),
+    ));
     html.push_str("</div>\n");
 
     // Component scores
@@ -797,20 +820,56 @@ fn build_html_report(display_name: &str, l: &LoadedAnalytics) -> String {
     html.push_str(&panel_html(
         "Message Analysis",
         &[
-            ("Messages", format_with_commas(l.my_messages), format_with_commas(l.their_messages)),
-            ("Words", format_with_commas(l.my_words), format_with_commas(l.their_words)),
-            ("Unique words", format_with_commas(l.my_unique_words), format_with_commas(l.their_unique_words)),
-            ("Characters", format_with_commas(l.my_chars), format_with_commas(l.their_chars)),
+            (
+                "Messages",
+                format_with_commas(l.my_messages),
+                format_with_commas(l.their_messages),
+            ),
+            (
+                "Words",
+                format_with_commas(l.my_words),
+                format_with_commas(l.their_words),
+            ),
+            (
+                "Unique words",
+                format_with_commas(l.my_unique_words),
+                format_with_commas(l.their_unique_words),
+            ),
+            (
+                "Characters",
+                format_with_commas(l.my_chars),
+                format_with_commas(l.their_chars),
+            ),
         ],
     ));
     html.push_str(&panel_html(
         "Media Stats",
         &[
-            ("Images", format_with_commas(l.my_images), format_with_commas(l.their_images)),
-            ("Videos", format_with_commas(l.my_videos), format_with_commas(l.their_videos)),
-            ("Audios", format_with_commas(l.my_audios), format_with_commas(l.their_audios)),
-            ("GIFs", format_with_commas(l.my_gifs), format_with_commas(l.their_gifs)),
-            ("Links", format_with_commas(l.my_links), format_with_commas(l.their_links)),
+            (
+                "Images",
+                format_with_commas(l.my_images),
+                format_with_commas(l.their_images),
+            ),
+            (
+                "Videos",
+                format_with_commas(l.my_videos),
+                format_with_commas(l.their_videos),
+            ),
+            (
+                "Audios",
+                format_with_commas(l.my_audios),
+                format_with_commas(l.their_audios),
+            ),
+            (
+                "GIFs",
+                format_with_commas(l.my_gifs),
+                format_with_commas(l.their_gifs),
+            ),
+            (
+                "Links",
+                format_with_commas(l.my_links),
+                format_with_commas(l.their_links),
+            ),
         ],
     ));
     html.push_str("</div>\n");
@@ -819,22 +878,66 @@ fn build_html_report(display_name: &str, l: &LoadedAnalytics) -> String {
     html.push_str(&panel_html(
         "Language",
         &[
-            ("Emojis", format_with_commas(l.my_emoji_total), format_with_commas(l.their_emoji_total)),
-            ("Laughs", format_with_commas(l.my_laughs), format_with_commas(l.their_laughs)),
-            ("Apologies", format_with_commas(l.my_apologies), format_with_commas(l.their_apologies)),
-            ("Questions", format_with_commas(l.my_questions), format_with_commas(l.their_questions)),
-            ("Encouragement", format_with_commas(l.my_encouragement), format_with_commas(l.their_encouragement)),
+            (
+                "Emojis",
+                format_with_commas(l.my_emoji_total),
+                format_with_commas(l.their_emoji_total),
+            ),
+            (
+                "Laughs",
+                format_with_commas(l.my_laughs),
+                format_with_commas(l.their_laughs),
+            ),
+            (
+                "Apologies",
+                format_with_commas(l.my_apologies),
+                format_with_commas(l.their_apologies),
+            ),
+            (
+                "Questions",
+                format_with_commas(l.my_questions),
+                format_with_commas(l.their_questions),
+            ),
+            (
+                "Encouragement",
+                format_with_commas(l.my_encouragement),
+                format_with_commas(l.their_encouragement),
+            ),
         ],
     ));
     html.push_str(&panel_html(
         "Responding",
         &[
-            ("Median response", fmt_ms_or_dash(l.my_median_resp_ms), fmt_ms_or_dash(l.their_median_resp_ms)),
-            ("Mean response", fmt_ms_or_dash(l.my_mean_resp_ms), fmt_ms_or_dash(l.their_mean_resp_ms)),
-            ("Rapid response", fmt_pct_or_dash(l.my_rapid_pct), fmt_pct_or_dash(l.their_rapid_pct)),
-            ("First-response median", fmt_ms_or_dash(l.my_first_median_ms), fmt_ms_or_dash(l.their_first_median_ms)),
-            ("Awake median", fmt_ms_or_dash(l.my_awake_median_ms), fmt_ms_or_dash(l.their_awake_median_ms)),
-            ("Overnight median", fmt_ms_or_dash(l.my_overnight_median_ms), fmt_ms_or_dash(l.their_overnight_median_ms)),
+            (
+                "Median response",
+                fmt_ms_or_dash(l.my_median_resp_ms),
+                fmt_ms_or_dash(l.their_median_resp_ms),
+            ),
+            (
+                "Mean response",
+                fmt_ms_or_dash(l.my_mean_resp_ms),
+                fmt_ms_or_dash(l.their_mean_resp_ms),
+            ),
+            (
+                "Rapid response",
+                fmt_pct_or_dash(l.my_rapid_pct),
+                fmt_pct_or_dash(l.their_rapid_pct),
+            ),
+            (
+                "First-response median",
+                fmt_ms_or_dash(l.my_first_median_ms),
+                fmt_ms_or_dash(l.their_first_median_ms),
+            ),
+            (
+                "Awake median",
+                fmt_ms_or_dash(l.my_awake_median_ms),
+                fmt_ms_or_dash(l.their_awake_median_ms),
+            ),
+            (
+                "Overnight median",
+                fmt_ms_or_dash(l.my_overnight_median_ms),
+                fmt_ms_or_dash(l.their_overnight_median_ms),
+            ),
         ],
     ));
     html.push_str("</div>\n");
@@ -842,10 +945,26 @@ fn build_html_report(display_name: &str, l: &LoadedAnalytics) -> String {
     html.push_str(&panel_html(
         "Conversation Analysis",
         &[
-            ("Started", format_with_commas(l.started_by_me), format_with_commas(l.started_by_them)),
-            ("Closed", format_with_commas(l.closed_by_me), format_with_commas(l.closed_by_them)),
-            ("Missed", format_with_commas(l.my_missed), format_with_commas(l.their_missed)),
-            ("Doubles", format_with_commas(l.my_doubles), format_with_commas(l.their_doubles)),
+            (
+                "Started",
+                format_with_commas(l.started_by_me),
+                format_with_commas(l.started_by_them),
+            ),
+            (
+                "Closed",
+                format_with_commas(l.closed_by_me),
+                format_with_commas(l.closed_by_them),
+            ),
+            (
+                "Missed",
+                format_with_commas(l.my_missed),
+                format_with_commas(l.their_missed),
+            ),
+            (
+                "Doubles",
+                format_with_commas(l.my_doubles),
+                format_with_commas(l.their_doubles),
+            ),
         ],
     ));
 
@@ -861,10 +980,22 @@ fn build_html_report(display_name: &str, l: &LoadedAnalytics) -> String {
     if !l.daily.is_empty() {
         let s = compute_streaks(&l.daily);
         html.push_str("<h2>Streaks</h2>\n<table class=\"k-v\">\n");
-        html.push_str(&format!("<tr><td>Current active streak</td><td>{} days</td></tr>\n", s.current_active_streak));
-        html.push_str(&format!("<tr><td>Longest active streak</td><td>{} days</td></tr>\n", s.longest_active_streak));
-        html.push_str(&format!("<tr><td>Current silence</td><td>{} days</td></tr>\n", s.current_silent_streak));
-        html.push_str(&format!("<tr><td>Longest silence</td><td>{} days</td></tr>\n", s.longest_silent_streak));
+        html.push_str(&format!(
+            "<tr><td>Current active streak</td><td>{} days</td></tr>\n",
+            s.current_active_streak
+        ));
+        html.push_str(&format!(
+            "<tr><td>Longest active streak</td><td>{} days</td></tr>\n",
+            s.longest_active_streak
+        ));
+        html.push_str(&format!(
+            "<tr><td>Current silence</td><td>{} days</td></tr>\n",
+            s.current_silent_streak
+        ));
+        html.push_str(&format!(
+            "<tr><td>Longest silence</td><td>{} days</td></tr>\n",
+            s.longest_silent_streak
+        ));
         html.push_str("</table>\n");
     }
 
@@ -879,10 +1010,16 @@ fn build_html_report(display_name: &str, l: &LoadedAnalytics) -> String {
         if !timeline.days.is_empty() {
             html.push_str("<h2>Sentiment Timeline</h2>\n");
             if let Some(my) = timeline.overall_my {
-                html.push_str(&format!("<p>Your overall tone: <strong>{:+.2}</strong></p>", my));
+                html.push_str(&format!(
+                    "<p>Your overall tone: <strong>{:+.2}</strong></p>",
+                    my
+                ));
             }
             if let Some(t) = timeline.overall_their {
-                html.push_str(&format!("<p>Their overall tone: <strong>{:+.2}</strong></p>", t));
+                html.push_str(&format!(
+                    "<p>Their overall tone: <strong>{:+.2}</strong></p>",
+                    t
+                ));
             }
             html.push_str(&build_sentiment_chart_svg(&timeline.days));
         }
@@ -954,18 +1091,36 @@ fn build_html_report(display_name: &str, l: &LoadedAnalytics) -> String {
         (l.focus_me_pct, l.focus_them_pct, l.focus_other_pct)
     {
         html.push_str("<h2>Direction of Conversation</h2>\n<table class=\"k-v\">\n");
-        html.push_str(&format!("<tr><td>You</td><td>{:.1}%</td></tr>\n", me * 100.0));
-        html.push_str(&format!("<tr><td>Them</td><td>{:.1}%</td></tr>\n", them * 100.0));
-        html.push_str(&format!("<tr><td>Others</td><td>{:.1}%</td></tr>\n", other * 100.0));
+        html.push_str(&format!(
+            "<tr><td>You</td><td>{:.1}%</td></tr>\n",
+            me * 100.0
+        ));
+        html.push_str(&format!(
+            "<tr><td>Them</td><td>{:.1}%</td></tr>\n",
+            them * 100.0
+        ));
+        html.push_str(&format!(
+            "<tr><td>Others</td><td>{:.1}%</td></tr>\n",
+            other * 100.0
+        ));
         html.push_str("</table>\n");
     }
 
     // Writing milestones
     if let Some(m) = &l.writing_milestones {
         html.push_str("<h2>Summary of Writing</h2>\n<table class=\"k-v\">\n");
-        html.push_str(&format!("<tr><td>Total characters</td><td>{}</td></tr>\n", format_with_commas(m.total_chars as i64)));
-        html.push_str(&format!("<tr><td>Total words</td><td>{}</td></tr>\n", format_with_commas(m.total_words as i64)));
-        html.push_str(&format!("<tr><td>Harry Potter equivalents</td><td>{:.2}</td></tr>\n", m.harry_potter_equivalents));
+        html.push_str(&format!(
+            "<tr><td>Total characters</td><td>{}</td></tr>\n",
+            format_with_commas(m.total_chars as i64)
+        ));
+        html.push_str(&format!(
+            "<tr><td>Total words</td><td>{}</td></tr>\n",
+            format_with_commas(m.total_words as i64)
+        ));
+        html.push_str(&format!(
+            "<tr><td>Harry Potter equivalents</td><td>{:.2}</td></tr>\n",
+            m.harry_potter_equivalents
+        ));
         html.push_str("</table>\n");
     }
 
@@ -1033,7 +1188,10 @@ fn panel_html(title: &str, rows: &[(&str, String, String)]) -> String {
 }
 
 fn emoji_row_html(who: &str, items: &[EmojiCount]) -> String {
-    let mut out = format!("<div class=\"row\"><span class=\"who\">{}:</span> ", html_escape(who));
+    let mut out = format!(
+        "<div class=\"row\"><span class=\"who\">{}:</span> ",
+        html_escape(who)
+    );
     if items.is_empty() {
         out.push_str("<em>(none)</em>");
     } else {
@@ -1085,8 +1243,8 @@ fn build_daily_heatmap_svg(daily: &[DailyActivityPoint]) -> String {
         .max(1) as f32;
 
     let first_date = NaiveDate::parse_from_str(&recent[0].day, "%Y-%m-%d").unwrap_or_default();
-    let anchor = first_date
-        - chrono::Duration::days(first_date.weekday().num_days_from_sunday() as i64);
+    let anchor =
+        first_date - chrono::Duration::days(first_date.weekday().num_days_from_sunday() as i64);
 
     let mut cells = Vec::new();
     let mut min_col = usize::MAX;
@@ -1157,7 +1315,12 @@ fn build_hourly_heatmap_svg(hourly: &[HourlyActivityBucket]) -> String {
     let cell_h = 22.0;
     let gap = 2.0;
     let label_w = 40.0;
-    let max_count = hourly.iter().map(|h| h.message_count).max().unwrap_or(1).max(1) as f32;
+    let max_count = hourly
+        .iter()
+        .map(|h| h.message_count)
+        .max()
+        .unwrap_or(1)
+        .max(1) as f32;
     let mut grid = [[0i64; 24]; 7];
     for h in hourly {
         if (h.day_of_week as usize) < 7 && (h.hour as usize) < 24 {
@@ -1256,7 +1419,10 @@ fn build_growth_chart_svg(daily: &[DailyActivityPoint]) -> String {
     let to_svg = |x: f64, y: f64| -> (f64, f64) {
         let nx = if max_x > 0.0 { x / max_x } else { 0.5 };
         let ny = if max_y > 0.0 { 1.0 - y / max_y } else { 1.0 };
-        (pad_l + nx * plot_w as f64, pad_t as f64 + ny * plot_h as f64)
+        (
+            pad_l + nx * plot_w as f64,
+            pad_t as f64 + ny * plot_h as f64,
+        )
     };
 
     let mut svg = format!(
@@ -1270,11 +1436,14 @@ fn build_growth_chart_svg(daily: &[DailyActivityPoint]) -> String {
     // Y labels
     svg.push_str(&format!(
         "<text x=\"{}\" y=\"{}\" font-size=\"10\" fill=\"#666\">{:.0}</text>\n",
-        pad_l - 4.0, pad_t + 4.0, max_y
+        pad_l - 4.0,
+        pad_t + 4.0,
+        max_y
     ));
     svg.push_str(&format!(
         "<text x=\"{}\" y=\"{}\" font-size=\"10\" fill=\"#666\">0</text>\n",
-        pad_l - 4.0, pad_t + plot_h
+        pad_l - 4.0,
+        pad_t + plot_h
     ));
 
     let path_for = |pts: &[(f64, f64)]| -> String {
@@ -1303,14 +1472,28 @@ fn build_growth_chart_svg(daily: &[DailyActivityPoint]) -> String {
     ));
     // Legend on right
     let lx = width - pad_r + 8.0;
-    svg.push_str(&format!("<text x=\"{}\" y=\"{}\" font-size=\"11\" fill=\"#b4b4dc\">— Total</text>\n", lx, pad_t + 14.0));
-    svg.push_str(&format!("<text x=\"{}\" y=\"{}\" font-size=\"11\" fill=\"#5082c8\">— You</text>\n", lx, pad_t + 28.0));
-    svg.push_str(&format!("<text x=\"{}\" y=\"{}\" font-size=\"11\" fill=\"#50c8a0\">— Them</text>\n", lx, pad_t + 42.0));
+    svg.push_str(&format!(
+        "<text x=\"{}\" y=\"{}\" font-size=\"11\" fill=\"#b4b4dc\">— Total</text>\n",
+        lx,
+        pad_t + 14.0
+    ));
+    svg.push_str(&format!(
+        "<text x=\"{}\" y=\"{}\" font-size=\"11\" fill=\"#5082c8\">— You</text>\n",
+        lx,
+        pad_t + 28.0
+    ));
+    svg.push_str(&format!(
+        "<text x=\"{}\" y=\"{}\" font-size=\"11\" fill=\"#50c8a0\">— Them</text>\n",
+        lx,
+        pad_t + 42.0
+    ));
     // X-axis labels
     if let (Some(first), Some(last)) = (daily.first(), daily.last()) {
         svg.push_str(&format!(
             "<text x=\"{}\" y=\"{}\" font-size=\"10\" fill=\"#666\">{}</text>\n",
-            pad_l, height - 4.0, html_escape(&first.day)
+            pad_l,
+            height - 4.0,
+            html_escape(&first.day)
         ));
         svg.push_str(&format!(
             "<text x=\"{}\" y=\"{}\" font-size=\"10\" fill=\"#666\" text-anchor=\"end\">{}</text>\n",
@@ -1336,14 +1519,22 @@ fn build_sentiment_chart_svg(days: &[SentimentDayLoaded]) -> String {
     for d in days {
         for opt in [d.my_score, d.their_score] {
             if let Some(v) = opt {
-                if v < min_y { min_y = v; }
-                if v > max_y { max_y = v; }
+                if v < min_y {
+                    min_y = v;
+                }
+                if v > max_y {
+                    max_y = v;
+                }
             }
         }
     }
     let span = (max_y - min_y).max(1.0);
     let to_svg = |i: usize, y: f64| -> (f64, f64) {
-        let nx = if days.len() > 1 { i as f64 / (days.len() - 1) as f64 } else { 0.5 };
+        let nx = if days.len() > 1 {
+            i as f64 / (days.len() - 1) as f64
+        } else {
+            0.5
+        };
         let ny = 1.0 - (y - min_y) / span;
         (pad_l + nx * plot_w, pad_t + ny * plot_h)
     };
@@ -1363,12 +1554,28 @@ fn build_sentiment_chart_svg(days: &[SentimentDayLoaded]) -> String {
         pad_l, zy, pad_l + plot_w, zy
     ));
     // Y labels.
-    svg.push_str(&format!("<text x=\"{}\" y=\"{:.1}\" font-size=\"10\" fill=\"#666\">{:+.1}</text>\n", pad_l - 4.0, pad_t + 4.0, max_y));
-    svg.push_str(&format!("<text x=\"{}\" y=\"{:.1}\" font-size=\"10\" fill=\"#666\">0</text>\n", pad_l - 4.0, zy));
-    svg.push_str(&format!("<text x=\"{}\" y=\"{:.1}\" font-size=\"10\" fill=\"#666\">{:+.1}</text>\n", pad_l - 4.0, pad_t + plot_h, min_y));
+    svg.push_str(&format!(
+        "<text x=\"{}\" y=\"{:.1}\" font-size=\"10\" fill=\"#666\">{:+.1}</text>\n",
+        pad_l - 4.0,
+        pad_t + 4.0,
+        max_y
+    ));
+    svg.push_str(&format!(
+        "<text x=\"{}\" y=\"{:.1}\" font-size=\"10\" fill=\"#666\">0</text>\n",
+        pad_l - 4.0,
+        zy
+    ));
+    svg.push_str(&format!(
+        "<text x=\"{}\" y=\"{:.1}\" font-size=\"10\" fill=\"#666\">{:+.1}</text>\n",
+        pad_l - 4.0,
+        pad_t + plot_h,
+        min_y
+    ));
 
     let path_for = |pts: &[(f64, f64)]| -> Option<String> {
-        if pts.len() < 2 { return None; }
+        if pts.len() < 2 {
+            return None;
+        }
         let mut s = String::from("M");
         for (i, p) in pts.iter().enumerate() {
             let (x, y) = to_svg(p.0 as usize, p.1);
@@ -1403,10 +1610,23 @@ fn build_sentiment_chart_svg(days: &[SentimentDayLoaded]) -> String {
         ));
     }
     let lx = width - pad_r + 8.0;
-    svg.push_str(&format!("<text x=\"{}\" y=\"{}\" font-size=\"11\" fill=\"#5082c8\">— You</text>\n", lx, pad_t + 14.0));
-    svg.push_str(&format!("<text x=\"{}\" y=\"{}\" font-size=\"11\" fill=\"#50c8a0\">— Them</text>\n", lx, pad_t + 28.0));
+    svg.push_str(&format!(
+        "<text x=\"{}\" y=\"{}\" font-size=\"11\" fill=\"#5082c8\">— You</text>\n",
+        lx,
+        pad_t + 14.0
+    ));
+    svg.push_str(&format!(
+        "<text x=\"{}\" y=\"{}\" font-size=\"11\" fill=\"#50c8a0\">— Them</text>\n",
+        lx,
+        pad_t + 28.0
+    ));
     if let (Some(first), Some(last)) = (days.first(), days.last()) {
-        svg.push_str(&format!("<text x=\"{}\" y=\"{}\" font-size=\"10\" fill=\"#666\">{}</text>\n", pad_l, height - 4.0, html_escape(&first.day)));
+        svg.push_str(&format!(
+            "<text x=\"{}\" y=\"{}\" font-size=\"10\" fill=\"#666\">{}</text>\n",
+            pad_l,
+            height - 4.0,
+            html_escape(&first.day)
+        ));
         svg.push_str(&format!("<text x=\"{}\" y=\"{}\" font-size=\"10\" fill=\"#666\" text-anchor=\"end\">{}</text>\n", pad_l + plot_w, height - 4.0, html_escape(&last.day)));
     }
     svg.push_str("</svg>\n");
@@ -1429,16 +1649,18 @@ fn build_direction_donut_svg(me: f64, them: f64, other: f64) -> String {
         size, size, size, size
     );
     let mut start = -std::f64::consts::FRAC_PI_2;
-    for (frac, color) in [
-        (me_f, "#5082c8"),
-        (them_f, "#50c8a0"),
-        (other_f, "#b4b4b4"),
-    ] {
-        if frac <= 0.0 { continue; }
+    for (frac, color) in [(me_f, "#5082c8"), (them_f, "#50c8a0"), (other_f, "#b4b4b4")] {
+        if frac <= 0.0 {
+            continue;
+        }
         let end = start + std::f64::consts::TAU * frac;
         let (sx, sy) = (cx + r * start.cos(), cy + r * start.sin());
         let (ex, ey) = (cx + r * end.cos(), cy + r * end.sin());
-        let large = if (end - start) > std::f64::consts::PI { 1 } else { 0 };
+        let large = if (end - start) > std::f64::consts::PI {
+            1
+        } else {
+            0
+        };
         svg.push_str(&format!(
             "<path d=\"M{:.1},{:.1} A{:.1},{:.1} 0 {} 1 {:.1},{:.1}\" fill=\"none\" stroke=\"{}\" stroke-width=\"{:.1}\"/>\n",
             sx, sy, r, r, large, ex, ey, color, stroke
@@ -1446,9 +1668,24 @@ fn build_direction_donut_svg(me: f64, them: f64, other: f64) -> String {
         start = end;
     }
     // Legend
-    svg.push_str(&format!("<text x=\"{}\" y=\"{}\" font-size=\"11\" fill=\"#5082c8\">● You: {:.1}%</text>\n", cx + r + 16.0, cy - 14.0, me_f * 100.0));
-    svg.push_str(&format!("<text x=\"{}\" y=\"{}\" font-size=\"11\" fill=\"#50c8a0\">● Them: {:.1}%</text>\n", cx + r + 16.0, cy, them_f * 100.0));
-    svg.push_str(&format!("<text x=\"{}\" y=\"{}\" font-size=\"11\" fill=\"#888\">● Others: {:.1}%</text>\n", cx + r + 16.0, cy + 14.0, other_f * 100.0));
+    svg.push_str(&format!(
+        "<text x=\"{}\" y=\"{}\" font-size=\"11\" fill=\"#5082c8\">● You: {:.1}%</text>\n",
+        cx + r + 16.0,
+        cy - 14.0,
+        me_f * 100.0
+    ));
+    svg.push_str(&format!(
+        "<text x=\"{}\" y=\"{}\" font-size=\"11\" fill=\"#50c8a0\">● Them: {:.1}%</text>\n",
+        cx + r + 16.0,
+        cy,
+        them_f * 100.0
+    ));
+    svg.push_str(&format!(
+        "<text x=\"{}\" y=\"{}\" font-size=\"11\" fill=\"#888\">● Others: {:.1}%</text>\n",
+        cx + r + 16.0,
+        cy + 14.0,
+        other_f * 100.0
+    ));
     svg.push_str("</svg>\n");
     svg
 }
@@ -1467,15 +1704,29 @@ fn build_sankey_svg(data: &SankeyData) -> String {
         by_col[n.column as usize].push(n);
     }
 
-    struct NB { x: f64, y: f64, w: f64, h: f64, value: u32, label: String, column: u8 }
+    struct NB {
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+        value: u32,
+        label: String,
+        column: u8,
+    }
     let mut boxes: std::collections::HashMap<String, NB> = std::collections::HashMap::new();
 
-    let col_step = if max_col > 1 { plot_w / (max_col as f64 - 1.0) } else { plot_w };
+    let col_step = if max_col > 1 {
+        plot_w / (max_col as f64 - 1.0)
+    } else {
+        plot_w
+    };
     let node_w = (col_step * 0.18).clamp(30.0, 70.0);
 
     for (ci, col) in by_col.iter().enumerate() {
         let total: u32 = col.iter().map(|n| n.value).sum();
-        if total == 0 { continue; }
+        if total == 0 {
+            continue;
+        }
         let gap = 8.0;
         let usable_h = plot_h - gap * col.len().saturating_sub(1) as f64;
         let mut y = pad_y;
@@ -1487,10 +1738,18 @@ fn build_sankey_svg(data: &SankeyData) -> String {
 
         for n in sorted {
             let h = usable_h * n.value as f64 / total as f64;
-            boxes.insert(n.id.clone(), NB {
-                x: xl, y, w: node_w, h: h.max(2.0),
-                value: n.value, label: n.label.clone(), column: n.column,
-            });
+            boxes.insert(
+                n.id.clone(),
+                NB {
+                    x: xl,
+                    y,
+                    w: node_w,
+                    h: h.max(2.0),
+                    value: n.value,
+                    label: n.label.clone(),
+                    column: n.column,
+                },
+            );
             y += h + gap;
         }
     }
@@ -1504,7 +1763,9 @@ fn build_sankey_svg(data: &SankeyData) -> String {
     let mut src_off: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
     let mut tgt_off: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
     for link in &data.links {
-        let (Some(src), Some(tgt)) = (boxes.get(&link.source), boxes.get(&link.target)) else { continue };
+        let (Some(src), Some(tgt)) = (boxes.get(&link.source), boxes.get(&link.target)) else {
+            continue;
+        };
         let src_h = src.h * link.value as f64 / src.value.max(1) as f64;
         let tgt_h = tgt.h * link.value as f64 / tgt.value.max(1) as f64;
         let s_top = *src_off.entry(link.source.clone()).or_insert(0.0);
@@ -1557,14 +1818,23 @@ fn build_sankey_svg(data: &SankeyData) -> String {
 }
 
 fn sankey_link_color_html(source_id: &str) -> &'static str {
-    if source_id.starts_with("started_me") { "#5082c8" }
-    else if source_id.starts_with("started_them") { "#50c8a0" }
-    else if source_id.starts_with("big_moment") { "#dca03c" }
-    else if source_id.starts_with("everyday") { "#78a0c8" }
-    else if source_id.starts_with("no_reply") { "#dc5050" }
-    else if source_id.starts_with("contrib_me") { "#5082c8" }
-    else if source_id.starts_with("contrib_them") { "#50c8a0" }
-    else { "#999" }
+    if source_id.starts_with("started_me") {
+        "#5082c8"
+    } else if source_id.starts_with("started_them") {
+        "#50c8a0"
+    } else if source_id.starts_with("big_moment") {
+        "#dca03c"
+    } else if source_id.starts_with("everyday") {
+        "#78a0c8"
+    } else if source_id.starts_with("no_reply") {
+        "#dc5050"
+    } else if source_id.starts_with("contrib_me") {
+        "#5082c8"
+    } else if source_id.starts_with("contrib_them") {
+        "#50c8a0"
+    } else {
+        "#999"
+    }
 }
 
 fn sankey_node_color_html(column: u8) -> &'static str {
@@ -1734,14 +2004,7 @@ fn render_chat_rating_summary(ui: &mut egui::Ui, l: &LoadedAnalytics) {
 
         ui.add_space(6.0);
         ui.label(egui::RichText::new("Balance — message volume").strong());
-        paint_balance_bar(
-            ui,
-            l.my_messages,
-            l.their_messages,
-            "you",
-            "them",
-            22.0,
-        );
+        paint_balance_bar(ui, l.my_messages, l.their_messages, "you", "them", 22.0);
     });
 }
 
@@ -1792,7 +2055,11 @@ fn render_insights_panel(app: &mut SmsArchiveApp, ui: &mut egui::Ui) {
     let total = loaded.insights.len();
     const PER_CAT_DEFAULT: usize = 3;
     let show_all = app.analytics.insights_show_all;
-    let visible_cap = if show_all { usize::MAX } else { PER_CAT_DEFAULT };
+    let visible_cap = if show_all {
+        usize::MAX
+    } else {
+        PER_CAT_DEFAULT
+    };
     let hidden = total.saturating_sub(
         your_side.len().min(visible_cap)
             + their_side.len().min(visible_cap)
@@ -1845,10 +2112,7 @@ fn render_one_insight(ui: &mut egui::Ui, insight: &LoadedInsight) {
                         ui.weak(&insight.detail);
                     }
                     if insight.confidence == "Low" {
-                        ui.colored_label(
-                            egui::Color32::from_rgb(180, 180, 90),
-                            "(limited data)",
-                        );
+                        ui.colored_label(egui::Color32::from_rgb(180, 180, 90), "(limited data)");
                     }
                 });
             });
@@ -1872,12 +2136,32 @@ fn insight_color(insight: &LoadedInsight) -> egui::Color32 {
 fn render_message_analysis_panel(ui: &mut egui::Ui, l: &LoadedAnalytics) {
     ui.group(|ui| {
         ui.heading("Message Analysis");
-        side_by_side_grid(ui, "msg_analysis", &[
-            ("Messages", format_with_commas(l.my_messages), format_with_commas(l.their_messages)),
-            ("Words", format_with_commas(l.my_words), format_with_commas(l.their_words)),
-            ("Unique words", format_with_commas(l.my_unique_words), format_with_commas(l.their_unique_words)),
-            ("Characters", format_with_commas(l.my_chars), format_with_commas(l.their_chars)),
-        ]);
+        side_by_side_grid(
+            ui,
+            "msg_analysis",
+            &[
+                (
+                    "Messages",
+                    format_with_commas(l.my_messages),
+                    format_with_commas(l.their_messages),
+                ),
+                (
+                    "Words",
+                    format_with_commas(l.my_words),
+                    format_with_commas(l.their_words),
+                ),
+                (
+                    "Unique words",
+                    format_with_commas(l.my_unique_words),
+                    format_with_commas(l.their_unique_words),
+                ),
+                (
+                    "Characters",
+                    format_with_commas(l.my_chars),
+                    format_with_commas(l.their_chars),
+                ),
+            ],
+        );
     });
 }
 
@@ -1886,13 +2170,37 @@ fn render_message_analysis_panel(ui: &mut egui::Ui, l: &LoadedAnalytics) {
 fn render_media_stats_panel(ui: &mut egui::Ui, l: &LoadedAnalytics) {
     ui.group(|ui| {
         ui.heading("Media Stats");
-        side_by_side_grid(ui, "media_stats", &[
-            ("Images", format_with_commas(l.my_images), format_with_commas(l.their_images)),
-            ("Videos", format_with_commas(l.my_videos), format_with_commas(l.their_videos)),
-            ("Audios", format_with_commas(l.my_audios), format_with_commas(l.their_audios)),
-            ("GIFs", format_with_commas(l.my_gifs), format_with_commas(l.their_gifs)),
-            ("Links", format_with_commas(l.my_links), format_with_commas(l.their_links)),
-        ]);
+        side_by_side_grid(
+            ui,
+            "media_stats",
+            &[
+                (
+                    "Images",
+                    format_with_commas(l.my_images),
+                    format_with_commas(l.their_images),
+                ),
+                (
+                    "Videos",
+                    format_with_commas(l.my_videos),
+                    format_with_commas(l.their_videos),
+                ),
+                (
+                    "Audios",
+                    format_with_commas(l.my_audios),
+                    format_with_commas(l.their_audios),
+                ),
+                (
+                    "GIFs",
+                    format_with_commas(l.my_gifs),
+                    format_with_commas(l.their_gifs),
+                ),
+                (
+                    "Links",
+                    format_with_commas(l.my_links),
+                    format_with_commas(l.their_links),
+                ),
+            ],
+        );
     });
 }
 
@@ -1901,28 +2209,32 @@ fn render_media_stats_panel(ui: &mut egui::Ui, l: &LoadedAnalytics) {
 fn render_conversation_analysis_panel(ui: &mut egui::Ui, l: &LoadedAnalytics) {
     ui.group(|ui| {
         ui.heading("Conversation Analysis");
-        side_by_side_grid(ui, "conv_analysis", &[
-            (
-                "Convos started",
-                format_with_commas(l.started_by_me),
-                format_with_commas(l.started_by_them),
-            ),
-            (
-                "Convos closed",
-                format_with_commas(l.closed_by_me),
-                format_with_commas(l.closed_by_them),
-            ),
-            (
-                "Convos missed",
-                format_with_commas(l.my_missed),
-                format_with_commas(l.their_missed),
-            ),
-            (
-                "Double messages",
-                format_with_commas(l.my_doubles),
-                format_with_commas(l.their_doubles),
-            ),
-        ]);
+        side_by_side_grid(
+            ui,
+            "conv_analysis",
+            &[
+                (
+                    "Convos started",
+                    format_with_commas(l.started_by_me),
+                    format_with_commas(l.started_by_them),
+                ),
+                (
+                    "Convos closed",
+                    format_with_commas(l.closed_by_me),
+                    format_with_commas(l.closed_by_them),
+                ),
+                (
+                    "Convos missed",
+                    format_with_commas(l.my_missed),
+                    format_with_commas(l.their_missed),
+                ),
+                (
+                    "Double messages",
+                    format_with_commas(l.my_doubles),
+                    format_with_commas(l.their_doubles),
+                ),
+            ],
+        );
         ui.add_space(4.0);
         let top = match l.top_contributor {
             Some(1) => "you",
@@ -1951,33 +2263,37 @@ fn render_language_analysis_panel(ui: &mut egui::Ui, l: &LoadedAnalytics) {
         emoji_row(ui, "You", &l.my_top_emojis);
         emoji_row(ui, "Them", &l.their_top_emojis);
         ui.add_space(6.0);
-        side_by_side_grid(ui, "language_grid", &[
-            (
-                "Emojis (total)",
-                format_with_commas(l.my_emoji_total),
-                format_with_commas(l.their_emoji_total),
-            ),
-            (
-                "Laughs",
-                format_with_commas(l.my_laughs),
-                format_with_commas(l.their_laughs),
-            ),
-            (
-                "Apologies",
-                format_with_commas(l.my_apologies),
-                format_with_commas(l.their_apologies),
-            ),
-            (
-                "Questions",
-                format_with_commas(l.my_questions),
-                format_with_commas(l.their_questions),
-            ),
-            (
-                "Encouragement",
-                format_with_commas(l.my_encouragement),
-                format_with_commas(l.their_encouragement),
-            ),
-        ]);
+        side_by_side_grid(
+            ui,
+            "language_grid",
+            &[
+                (
+                    "Emojis (total)",
+                    format_with_commas(l.my_emoji_total),
+                    format_with_commas(l.their_emoji_total),
+                ),
+                (
+                    "Laughs",
+                    format_with_commas(l.my_laughs),
+                    format_with_commas(l.their_laughs),
+                ),
+                (
+                    "Apologies",
+                    format_with_commas(l.my_apologies),
+                    format_with_commas(l.their_apologies),
+                ),
+                (
+                    "Questions",
+                    format_with_commas(l.my_questions),
+                    format_with_commas(l.their_questions),
+                ),
+                (
+                    "Encouragement",
+                    format_with_commas(l.my_encouragement),
+                    format_with_commas(l.their_encouragement),
+                ),
+            ],
+        );
     });
 }
 
@@ -1992,10 +2308,7 @@ fn emoji_row(ui: &mut egui::Ui, who: &str, items: &[EmojiCount]) {
     ui.horizontal(|ui| {
         ui.label(format!("{}:", who));
         for item in items.iter().take(5) {
-            ui.label(
-                egui::RichText::new(format!("{} {}", item.emoji, item.count))
-                    .size(16.0),
-            );
+            ui.label(egui::RichText::new(format!("{} {}", item.emoji, item.count)).size(16.0));
         }
     });
 }
@@ -2005,38 +2318,42 @@ fn emoji_row(ui: &mut egui::Ui, who: &str, items: &[EmojiCount]) {
 fn render_responding_panel(ui: &mut egui::Ui, l: &LoadedAnalytics) {
     ui.group(|ui| {
         ui.heading("Responding");
-        side_by_side_grid(ui, "responding_grid", &[
-            (
-                "Median response",
-                fmt_ms_or_dash(l.my_median_resp_ms),
-                fmt_ms_or_dash(l.their_median_resp_ms),
-            ),
-            (
-                "Mean response",
-                fmt_ms_or_dash(l.my_mean_resp_ms),
-                fmt_ms_or_dash(l.their_mean_resp_ms),
-            ),
-            (
-                "Rapid response",
-                fmt_pct_or_dash(l.my_rapid_pct),
-                fmt_pct_or_dash(l.their_rapid_pct),
-            ),
-            (
-                "Median 1st response",
-                fmt_ms_or_dash(l.my_first_median_ms),
-                fmt_ms_or_dash(l.their_first_median_ms),
-            ),
-            (
-                "Awake median",
-                fmt_ms_or_dash(l.my_awake_median_ms),
-                fmt_ms_or_dash(l.their_awake_median_ms),
-            ),
-            (
-                "Overnight median",
-                fmt_ms_or_dash(l.my_overnight_median_ms),
-                fmt_ms_or_dash(l.their_overnight_median_ms),
-            ),
-        ]);
+        side_by_side_grid(
+            ui,
+            "responding_grid",
+            &[
+                (
+                    "Median response",
+                    fmt_ms_or_dash(l.my_median_resp_ms),
+                    fmt_ms_or_dash(l.their_median_resp_ms),
+                ),
+                (
+                    "Mean response",
+                    fmt_ms_or_dash(l.my_mean_resp_ms),
+                    fmt_ms_or_dash(l.their_mean_resp_ms),
+                ),
+                (
+                    "Rapid response",
+                    fmt_pct_or_dash(l.my_rapid_pct),
+                    fmt_pct_or_dash(l.their_rapid_pct),
+                ),
+                (
+                    "Median 1st response",
+                    fmt_ms_or_dash(l.my_first_median_ms),
+                    fmt_ms_or_dash(l.their_first_median_ms),
+                ),
+                (
+                    "Awake median",
+                    fmt_ms_or_dash(l.my_awake_median_ms),
+                    fmt_ms_or_dash(l.their_awake_median_ms),
+                ),
+                (
+                    "Overnight median",
+                    fmt_ms_or_dash(l.my_overnight_median_ms),
+                    fmt_ms_or_dash(l.their_overnight_median_ms),
+                ),
+            ],
+        );
     });
 }
 
@@ -2167,46 +2484,61 @@ fn load_settings_from_db(db_path: &str) -> Result<AnalyticsSettings, String> {
         .map_err(|e| format!("prepare: {}", e))?;
     let mut map = std::collections::HashMap::<String, String>::new();
     let rows = stmt
-        .query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-        })
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
         .map_err(|e| format!("query: {}", e))?;
     for r in rows.flatten() {
         map.insert(r.0, r.1);
     }
 
     let mut s = AnalyticsSettings::default();
-    macro_rules! get_f64 { ($field:ident, $key:literal) => {
-        if let Some(v) = map.get($key).and_then(|x| x.parse::<f64>().ok()) {
-            s.$field = v;
-        }
-    }; }
-    macro_rules! get_i64 { ($field:ident, $key:literal) => {
-        if let Some(v) = map.get($key).and_then(|x| x.parse::<i64>().ok()) {
-            s.$field = v;
-        }
-    }; }
-    macro_rules! get_u32 { ($field:ident, $key:literal) => {
-        if let Some(v) = map.get($key).and_then(|x| x.parse::<u32>().ok()) {
-            s.$field = v;
-        }
-    }; }
-    macro_rules! get_u8  { ($field:ident, $key:literal) => {
-        if let Some(v) = map.get($key).and_then(|x| x.parse::<u8>().ok()) {
-            s.$field = v;
-        }
-    }; }
+    macro_rules! get_f64 {
+        ($field:ident, $key:literal) => {
+            if let Some(v) = map.get($key).and_then(|x| x.parse::<f64>().ok()) {
+                s.$field = v;
+            }
+        };
+    }
+    macro_rules! get_i64 {
+        ($field:ident, $key:literal) => {
+            if let Some(v) = map.get($key).and_then(|x| x.parse::<i64>().ok()) {
+                s.$field = v;
+            }
+        };
+    }
+    macro_rules! get_u32 {
+        ($field:ident, $key:literal) => {
+            if let Some(v) = map.get($key).and_then(|x| x.parse::<u32>().ok()) {
+                s.$field = v;
+            }
+        };
+    }
+    macro_rules! get_u8 {
+        ($field:ident, $key:literal) => {
+            if let Some(v) = map.get($key).and_then(|x| x.parse::<u8>().ok()) {
+                s.$field = v;
+            }
+        };
+    }
 
     get_i64!(conversation_timeout_secs, "conversation_timeout_secs");
     get_u32!(big_moment_threshold_static, "big_moment_threshold_static");
-    get_u8!(big_moment_threshold_dynamic_pct, "big_moment_threshold_dynamic_pct");
-    get_u32!(big_moment_threshold_dynamic_floor, "big_moment_threshold_dynamic_floor");
+    get_u8!(
+        big_moment_threshold_dynamic_pct,
+        "big_moment_threshold_dynamic_pct"
+    );
+    get_u32!(
+        big_moment_threshold_dynamic_floor,
+        "big_moment_threshold_dynamic_floor"
+    );
     get_i64!(reconnect_tier1_secs, "reconnect_tier1_secs");
     get_i64!(reconnect_tier2_secs, "reconnect_tier2_secs");
     get_i64!(reconnect_tier3_secs, "reconnect_tier3_secs");
     get_f64!(reconnect_tier4_multiplier, "reconnect_tier4_multiplier");
 
-    get_i64!(rapid_response_threshold_secs, "rapid_response_threshold_secs");
+    get_i64!(
+        rapid_response_threshold_secs,
+        "rapid_response_threshold_secs"
+    );
     get_u8!(overnight_window_start_hour, "overnight_window_start_hour");
     get_u8!(overnight_window_end_hour, "overnight_window_end_hour");
 
@@ -2233,14 +2565,20 @@ fn load_settings_from_db(db_path: &str) -> Result<AnalyticsSettings, String> {
     get_f64!(rating_weight_mutual_effort, "rating_weight_mutual_effort");
 
     get_u32!(rating_hide_below_messages, "rating_hide_below_messages");
-    get_u32!(rating_low_confidence_max_messages, "rating_low_confidence_max_messages");
+    get_u32!(
+        rating_low_confidence_max_messages,
+        "rating_low_confidence_max_messages"
+    );
 
     get_f64!(insight_tier1_ratio, "insight_tier1_ratio");
     get_f64!(insight_tier2_ratio, "insight_tier2_ratio");
     get_f64!(insight_tier3_ratio, "insight_tier3_ratio");
     get_f64!(insight_tier4_ratio, "insight_tier4_ratio");
     get_u32!(insight_min_sample_per_rule, "insight_min_sample_per_rule");
-    get_u32!(insight_low_confidence_max_sample, "insight_low_confidence_max_sample");
+    get_u32!(
+        insight_low_confidence_max_sample,
+        "insight_low_confidence_max_sample"
+    );
 
     get_u32!(contact_picker_min_messages, "contact_picker_min_messages");
 
@@ -2253,17 +2591,41 @@ fn save_settings_to_db(db_path: &str, s: &AnalyticsSettings) -> Result<(), Strin
     let conn = db.connection();
 
     let pairs: Vec<(&'static str, String)> = vec![
-        ("conversation_timeout_secs", s.conversation_timeout_secs.to_string()),
-        ("big_moment_threshold_static", s.big_moment_threshold_static.to_string()),
-        ("big_moment_threshold_dynamic_pct", s.big_moment_threshold_dynamic_pct.to_string()),
-        ("big_moment_threshold_dynamic_floor", s.big_moment_threshold_dynamic_floor.to_string()),
+        (
+            "conversation_timeout_secs",
+            s.conversation_timeout_secs.to_string(),
+        ),
+        (
+            "big_moment_threshold_static",
+            s.big_moment_threshold_static.to_string(),
+        ),
+        (
+            "big_moment_threshold_dynamic_pct",
+            s.big_moment_threshold_dynamic_pct.to_string(),
+        ),
+        (
+            "big_moment_threshold_dynamic_floor",
+            s.big_moment_threshold_dynamic_floor.to_string(),
+        ),
         ("reconnect_tier1_secs", s.reconnect_tier1_secs.to_string()),
         ("reconnect_tier2_secs", s.reconnect_tier2_secs.to_string()),
         ("reconnect_tier3_secs", s.reconnect_tier3_secs.to_string()),
-        ("reconnect_tier4_multiplier", format!("{}", s.reconnect_tier4_multiplier)),
-        ("rapid_response_threshold_secs", s.rapid_response_threshold_secs.to_string()),
-        ("overnight_window_start_hour", s.overnight_window_start_hour.to_string()),
-        ("overnight_window_end_hour", s.overnight_window_end_hour.to_string()),
+        (
+            "reconnect_tier4_multiplier",
+            format!("{}", s.reconnect_tier4_multiplier),
+        ),
+        (
+            "rapid_response_threshold_secs",
+            s.rapid_response_threshold_secs.to_string(),
+        ),
+        (
+            "overnight_window_start_hour",
+            s.overnight_window_start_hour.to_string(),
+        ),
+        (
+            "overnight_window_end_hour",
+            s.overnight_window_end_hour.to_string(),
+        ),
         ("weight_text_message", format!("{}", s.weight_text_message)),
         ("weight_per_word_log", format!("{}", s.weight_per_word_log)),
         ("weight_emoji", format!("{}", s.weight_emoji)),
@@ -2273,26 +2635,71 @@ fn save_settings_to_db(db_path: &str, s: &AnalyticsSettings) -> Result<(), Strin
         ("weight_audio", format!("{}", s.weight_audio)),
         ("weight_gif", format!("{}", s.weight_gif)),
         ("weight_link", format!("{}", s.weight_link)),
-        ("weight_started_convo", format!("{}", s.weight_started_convo)),
-        ("weight_rapid_response", format!("{}", s.weight_rapid_response)),
-        ("weight_encouragement", format!("{}", s.weight_encouragement)),
+        (
+            "weight_started_convo",
+            format!("{}", s.weight_started_convo),
+        ),
+        (
+            "weight_rapid_response",
+            format!("{}", s.weight_rapid_response),
+        ),
+        (
+            "weight_encouragement",
+            format!("{}", s.weight_encouragement),
+        ),
         ("weight_apology", format!("{}", s.weight_apology)),
-        ("rating_weight_responsiveness", format!("{}", s.rating_weight_responsiveness)),
-        ("rating_weight_balance", format!("{}", s.rating_weight_balance)),
-        ("rating_weight_engagement", format!("{}", s.rating_weight_engagement)),
-        ("rating_weight_consistency", format!("{}", s.rating_weight_consistency)),
-        ("rating_weight_reciprocity", format!("{}", s.rating_weight_reciprocity)),
-        ("rating_weight_longevity", format!("{}", s.rating_weight_longevity)),
-        ("rating_weight_mutual_effort", format!("{}", s.rating_weight_mutual_effort)),
-        ("rating_hide_below_messages", s.rating_hide_below_messages.to_string()),
-        ("rating_low_confidence_max_messages", s.rating_low_confidence_max_messages.to_string()),
+        (
+            "rating_weight_responsiveness",
+            format!("{}", s.rating_weight_responsiveness),
+        ),
+        (
+            "rating_weight_balance",
+            format!("{}", s.rating_weight_balance),
+        ),
+        (
+            "rating_weight_engagement",
+            format!("{}", s.rating_weight_engagement),
+        ),
+        (
+            "rating_weight_consistency",
+            format!("{}", s.rating_weight_consistency),
+        ),
+        (
+            "rating_weight_reciprocity",
+            format!("{}", s.rating_weight_reciprocity),
+        ),
+        (
+            "rating_weight_longevity",
+            format!("{}", s.rating_weight_longevity),
+        ),
+        (
+            "rating_weight_mutual_effort",
+            format!("{}", s.rating_weight_mutual_effort),
+        ),
+        (
+            "rating_hide_below_messages",
+            s.rating_hide_below_messages.to_string(),
+        ),
+        (
+            "rating_low_confidence_max_messages",
+            s.rating_low_confidence_max_messages.to_string(),
+        ),
         ("insight_tier1_ratio", format!("{}", s.insight_tier1_ratio)),
         ("insight_tier2_ratio", format!("{}", s.insight_tier2_ratio)),
         ("insight_tier3_ratio", format!("{}", s.insight_tier3_ratio)),
         ("insight_tier4_ratio", format!("{}", s.insight_tier4_ratio)),
-        ("insight_min_sample_per_rule", s.insight_min_sample_per_rule.to_string()),
-        ("insight_low_confidence_max_sample", s.insight_low_confidence_max_sample.to_string()),
-        ("contact_picker_min_messages", s.contact_picker_min_messages.to_string()),
+        (
+            "insight_min_sample_per_rule",
+            s.insight_min_sample_per_rule.to_string(),
+        ),
+        (
+            "insight_low_confidence_max_sample",
+            s.insight_low_confidence_max_sample.to_string(),
+        ),
+        (
+            "contact_picker_min_messages",
+            s.contact_picker_min_messages.to_string(),
+        ),
     ];
 
     conn.execute_batch("BEGIN IMMEDIATE TRANSACTION")
@@ -2326,16 +2733,17 @@ fn mark_all_caches_stale(db_path: &str) -> Result<(), String> {
     let db = Database::open(Path::new(db_path), ResourceProfile::detect())
         .map_err(|e| format!("open db: {}", e))?;
     let conn = db.connection();
-    conn.execute(
-        "UPDATE contact_analytics_status SET is_stale = 1",
-        [],
-    )
-    .map_err(|e| format!("update: {}", e))?;
+    conn.execute("UPDATE contact_analytics_status SET is_stale = 1", [])
+        .map_err(|e| format!("update: {}", e))?;
     Ok(())
 }
 
 fn render_settings_disclosure(app: &mut SmsArchiveApp, ui: &mut egui::Ui) {
-    let header = if app.analytics.settings_open { "▼" } else { "▶" };
+    let header = if app.analytics.settings_open {
+        "▼"
+    } else {
+        "▶"
+    };
     let resp = ui.button(format!(
         "{}  ⚙ Analytics Settings (weights, thresholds, tunables)",
         header
@@ -2515,7 +2923,11 @@ fn drag_u32(ui: &mut egui::Ui, label: &str, value: &mut u32, min: u32, max: u32)
 fn drag_u8(ui: &mut egui::Ui, label: &str, value: &mut u8, min: u8, max: u8) {
     ui.horizontal(|ui| {
         ui.add_sized([260.0, 18.0], egui::Label::new(label));
-        ui.add(egui::DragValue::new(value).clamp_range(min..=max).speed(0.5));
+        ui.add(
+            egui::DragValue::new(value)
+                .clamp_range(min..=max)
+                .speed(0.5),
+        );
     });
 }
 
@@ -2538,8 +2950,7 @@ fn rating_color(score: i64) -> egui::Color32 {
 /// Circular gauge: filled arc from 12 o'clock around to N% of the circle.
 /// `size` is the bounding-box edge length in logical pixels.
 fn paint_rating_gauge(ui: &mut egui::Ui, score: i64, size: f32) {
-    let (response, painter) =
-        ui.allocate_painter(egui::vec2(size, size), egui::Sense::hover());
+    let (response, painter) = ui.allocate_painter(egui::vec2(size, size), egui::Sense::hover());
     let rect = response.rect;
     let center = rect.center();
     let radius = size * 0.4;
@@ -2568,7 +2979,10 @@ fn paint_rating_gauge(ui: &mut egui::Ui, score: i64, size: f32) {
                 center.y + radius * angle.sin(),
             ));
         }
-        painter.add(egui::Shape::line(points, egui::Stroke::new(stroke_w, color)));
+        painter.add(egui::Shape::line(
+            points,
+            egui::Stroke::new(stroke_w, color),
+        ));
     }
 
     // Center label.
@@ -2683,11 +3097,19 @@ fn paint_relationship_growth_chart(
 
     // Axes background + frame.
     painter.rect_filled(rect, 4.0, egui::Color32::from_gray(28));
-    painter.rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(60)));
+    painter.rect_stroke(
+        rect,
+        4.0,
+        egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+    );
 
     // Y-axis labels (top, mid, bottom).
     let label_color = egui::Color32::from_gray(170);
-    for (frac, label) in [(0.0, format!("{:.0}", max_y)), (0.5, format!("{:.0}", max_y / 2.0)), (1.0, "0".to_string())] {
+    for (frac, label) in [
+        (0.0, format!("{:.0}", max_y)),
+        (0.5, format!("{:.0}", max_y / 2.0)),
+        (1.0, "0".to_string()),
+    ] {
         let y = plot.top() + plot.height() * frac;
         painter.text(
             egui::pos2(rect.left() + 4.0, y),
@@ -2743,7 +3165,11 @@ fn paint_relationship_growth_chart(
         egui::pos2(rect.right() - 110.0, rect.top() + 4.0),
         egui::vec2(106.0, 56.0),
     );
-    painter.rect_filled(legend_box, 4.0, egui::Color32::from_rgba_unmultiplied(28, 28, 28, 200));
+    painter.rect_filled(
+        legend_box,
+        4.0,
+        egui::Color32::from_rgba_unmultiplied(28, 28, 28, 200),
+    );
     let mut y = legend_box.top() + 6.0;
     for (color, label) in [
         (egui::Color32::from_rgb(180, 180, 220), "Total"),
@@ -2805,17 +3231,16 @@ fn render_sentiment_panel(ui: &mut egui::Ui, l: &LoadedAnalytics) {
     });
 }
 
-fn paint_sentiment_chart(
-    ui: &mut egui::Ui,
-    days: &[SentimentDayLoaded],
-    width: f32,
-    height: f32,
-) {
+fn paint_sentiment_chart(ui: &mut egui::Ui, days: &[SentimentDayLoaded], width: f32, height: f32) {
     let avail = ui.available_width().min(width).max(360.0);
     let (rect, _) = ui.allocate_exact_size(egui::vec2(avail, height), egui::Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(rect, 4.0, egui::Color32::from_gray(28));
-    painter.rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(60)));
+    painter.rect_stroke(
+        rect,
+        4.0,
+        egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+    );
 
     let plot = rect.shrink2(egui::vec2(40.0, 16.0));
 
@@ -2826,23 +3251,37 @@ fn paint_sentiment_chart(
         for opt in [d.my_score, d.their_score] {
             if let Some(v) = opt {
                 let v = v as f32;
-                if v < min_y { min_y = v; }
-                if v > max_y { max_y = v; }
+                if v < min_y {
+                    min_y = v;
+                }
+                if v > max_y {
+                    max_y = v;
+                }
             }
         }
     }
     // Symmetric padding around zero.
     let span = (max_y - min_y).max(1.0);
     let to_px = |i: usize, y: f32| -> egui::Pos2 {
-        let nx = if days.len() > 1 { i as f32 / (days.len() - 1) as f32 } else { 0.5 };
+        let nx = if days.len() > 1 {
+            i as f32 / (days.len() - 1) as f32
+        } else {
+            0.5
+        };
         let ny = 1.0 - (y - min_y) / span;
-        egui::pos2(plot.left() + nx * plot.width(), plot.top() + ny * plot.height())
+        egui::pos2(
+            plot.left() + nx * plot.width(),
+            plot.top() + ny * plot.height(),
+        )
     };
 
     // Zero line.
     let zero_y = plot.top() + (1.0 - (0.0 - min_y) / span) * plot.height();
     painter.line_segment(
-        [egui::pos2(plot.left(), zero_y), egui::pos2(plot.right(), zero_y)],
+        [
+            egui::pos2(plot.left(), zero_y),
+            egui::pos2(plot.right(), zero_y),
+        ],
         egui::Stroke::new(1.0, egui::Color32::from_gray(80)),
     );
     painter.text(
@@ -2914,7 +3353,11 @@ fn paint_sentiment_chart(
         egui::pos2(rect.right() - 100.0, rect.top() + 4.0),
         egui::vec2(96.0, 36.0),
     );
-    painter.rect_filled(legend, 4.0, egui::Color32::from_rgba_unmultiplied(28, 28, 28, 200));
+    painter.rect_filled(
+        legend,
+        4.0,
+        egui::Color32::from_rgba_unmultiplied(28, 28, 28, 200),
+    );
     painter.line_segment(
         [
             egui::pos2(legend.left() + 6.0, legend.top() + 10.0),
@@ -2992,19 +3435,12 @@ fn render_topics_panel(ui: &mut egui::Ui, l: &LoadedAnalytics) {
                     ui.label(format!("{}", i + 1));
                     ui.label(&t.phrase);
                     let bar_len = ((t.score / max_score) as f32 * 120.0).max(2.0);
-                    let (rect, _) = ui.allocate_exact_size(
-                        egui::vec2(140.0, 14.0),
-                        egui::Sense::hover(),
-                    );
-                    let bar_rect = egui::Rect::from_min_size(
-                        rect.min,
-                        egui::vec2(bar_len, rect.height()),
-                    );
-                    ui.painter().rect_filled(
-                        bar_rect,
-                        2.0,
-                        egui::Color32::from_rgb(180, 140, 200),
-                    );
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(140.0, 14.0), egui::Sense::hover());
+                    let bar_rect =
+                        egui::Rect::from_min_size(rect.min, egui::vec2(bar_len, rect.height()));
+                    ui.painter()
+                        .rect_filled(bar_rect, 2.0, egui::Color32::from_rgb(180, 140, 200));
                     ui.painter().text(
                         egui::pos2(rect.left() + bar_len + 4.0, rect.center().y),
                         egui::Align2::LEFT_CENTER,
@@ -3050,19 +3486,14 @@ fn render_inside_jokes_panel(ui: &mut egui::Ui, l: &LoadedAnalytics) {
                     ui.label(&j.phrase);
                     // Bar visualization.
                     let bar_len = (j.count as f32 / max) * 120.0;
-                    let (rect, _) = ui.allocate_exact_size(
-                        egui::vec2(140.0, 14.0),
-                        egui::Sense::hover(),
-                    );
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(140.0, 14.0), egui::Sense::hover());
                     let bar_rect = egui::Rect::from_min_size(
                         rect.min,
                         egui::vec2(bar_len.max(2.0), rect.height()),
                     );
-                    ui.painter().rect_filled(
-                        bar_rect,
-                        2.0,
-                        egui::Color32::from_rgb(120, 160, 200),
-                    );
+                    ui.painter()
+                        .rect_filled(bar_rect, 2.0, egui::Color32::from_rgb(120, 160, 200));
                     ui.painter().text(
                         egui::pos2(rect.left() + bar_len + 4.0, rect.center().y),
                         egui::Align2::LEFT_CENTER,
@@ -3229,20 +3660,13 @@ fn render_direction_donut_panel(ui: &mut egui::Ui, l: &LoadedAnalytics) {
     });
 }
 
-fn paint_direction_donut(
-    ui: &mut egui::Ui,
-    me_pct: f64,
-    them_pct: f64,
-    other_pct: f64,
-    size: f32,
-) {
+fn paint_direction_donut(ui: &mut egui::Ui, me_pct: f64, them_pct: f64, other_pct: f64, size: f32) {
     let total = (me_pct + them_pct + other_pct).max(1e-9);
     let me_frac = (me_pct / total).clamp(0.0, 1.0) as f32;
     let them_frac = (them_pct / total).clamp(0.0, 1.0) as f32;
     let other_frac = (other_pct / total).clamp(0.0, 1.0) as f32;
 
-    let (response, painter) =
-        ui.allocate_painter(egui::vec2(size, size), egui::Sense::hover());
+    let (response, painter) = ui.allocate_painter(egui::vec2(size, size), egui::Sense::hover());
     let rect = response.rect;
     let center = rect.center();
     let radius = size * 0.42;
@@ -3268,7 +3692,10 @@ fn paint_direction_donut(
                 center.y + radius * angle.sin(),
             ));
         }
-        painter.add(egui::Shape::line(points, egui::Stroke::new(stroke_w, color)));
+        painter.add(egui::Shape::line(
+            points,
+            egui::Stroke::new(stroke_w, color),
+        ));
         start = end;
     }
 }
@@ -3311,7 +3738,10 @@ fn render_sankey_panel(ui: &mut egui::Ui, l: &LoadedAnalytics) {
         let data: SankeyData = match serde_json::from_str(raw) {
             Ok(d) => d,
             Err(e) => {
-                ui.colored_label(egui::Color32::from_rgb(220, 80, 80), format!("Sankey JSON error: {}", e));
+                ui.colored_label(
+                    egui::Color32::from_rgb(220, 80, 80),
+                    format!("Sankey JSON error: {}", e),
+                );
                 return;
             }
         };
@@ -3328,7 +3758,11 @@ fn paint_sankey(ui: &mut egui::Ui, data: &SankeyData, width: f32, height: f32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(avail, height), egui::Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(rect, 4.0, egui::Color32::from_gray(28));
-    painter.rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(60)));
+    painter.rect_stroke(
+        rect,
+        4.0,
+        egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+    );
 
     // Group nodes by column.
     let max_col = data.nodes.iter().map(|n| n.column).max().unwrap_or(0) as usize + 1;
@@ -3479,12 +3913,8 @@ fn paint_sankey(ui: &mut egui::Ui, data: &SankeyData, width: f32, height: f32) {
             egui::Align2::CENTER_CENTER
         };
         let label_pos = match label_anchor {
-            egui::Align2::RIGHT_CENTER => {
-                egui::pos2(b.rect.left() - 4.0, b.rect.center().y)
-            }
-            egui::Align2::LEFT_CENTER => {
-                egui::pos2(b.rect.right() + 4.0, b.rect.center().y)
-            }
+            egui::Align2::RIGHT_CENTER => egui::pos2(b.rect.left() - 4.0, b.rect.center().y),
+            egui::Align2::LEFT_CENTER => egui::pos2(b.rect.right() + 4.0, b.rect.center().y),
             _ => egui::pos2(b.rect.center().x, b.rect.center().y),
         };
         painter.text(
@@ -3505,8 +3935,14 @@ fn bezier_point(
     t: f32,
 ) -> egui::Pos2 {
     let u = 1.0 - t;
-    let x = u.powi(3) * p0.x + 3.0 * u.powi(2) * t * p1.x + 3.0 * u * t.powi(2) * p2.x + t.powi(3) * p3.x;
-    let y = u.powi(3) * p0.y + 3.0 * u.powi(2) * t * p1.y + 3.0 * u * t.powi(2) * p2.y + t.powi(3) * p3.y;
+    let x = u.powi(3) * p0.x
+        + 3.0 * u.powi(2) * t * p1.x
+        + 3.0 * u * t.powi(2) * p2.x
+        + t.powi(3) * p3.x;
+    let y = u.powi(3) * p0.y
+        + 3.0 * u.powi(2) * t * p1.y
+        + 3.0 * u * t.powi(2) * p2.y
+        + t.powi(3) * p3.y;
     egui::pos2(x, y)
 }
 
@@ -3588,8 +4024,8 @@ fn paint_daily_heatmap(ui: &mut egui::Ui, daily: &[DailyActivityPoint]) {
 
     let first_date = NaiveDate::parse_from_str(&recent[0].day, "%Y-%m-%d").unwrap_or_default();
     // anchor_sunday = the most recent Sunday on/before first_date
-    let anchor_sunday = first_date
-        - chrono::Duration::days(first_date.weekday().num_days_from_sunday() as i64);
+    let anchor_sunday =
+        first_date - chrono::Duration::days(first_date.weekday().num_days_from_sunday() as i64);
 
     for d in recent {
         let Ok(date) = NaiveDate::parse_from_str(&d.day, "%Y-%m-%d") else {
@@ -3614,7 +4050,11 @@ fn paint_daily_heatmap(ui: &mut egui::Ui, daily: &[DailyActivityPoint]) {
         if col > max_col {
             max_col = col;
         }
-        cells.push(Cell { col, row, intensity });
+        cells.push(Cell {
+            col,
+            row,
+            intensity,
+        });
     }
 
     if cells.is_empty() {
@@ -3684,7 +4124,11 @@ fn ironbow_color(intensity: f32) -> egui::Color32 {
         let (a_t, a_rgb) = window[0];
         let (b_t, b_rgb) = window[1];
         if t >= a_t && t <= b_t {
-            let local = if b_t > a_t { (t - a_t) / (b_t - a_t) } else { 0.0 };
+            let local = if b_t > a_t {
+                (t - a_t) / (b_t - a_t)
+            } else {
+                0.0
+            };
             return egui::Color32::from_rgb(
                 lerp_u8(a_rgb[0], b_rgb[0], local),
                 lerp_u8(a_rgb[1], b_rgb[1], local),
@@ -3723,7 +4167,12 @@ fn paint_hourly_heatmap(ui: &mut egui::Ui, hourly: &[HourlyActivityBucket]) {
     let label_w = 36.0;
 
     // Find max for color scaling.
-    let max_count = hourly.iter().map(|h| h.message_count).max().unwrap_or(1).max(1) as f32;
+    let max_count = hourly
+        .iter()
+        .map(|h| h.message_count)
+        .max()
+        .unwrap_or(1)
+        .max(1) as f32;
 
     // Build a (dow, hour) → count lookup. Indexes that have no row stay at 0.
     let mut grid = [[0i64; 24]; 7];
@@ -3872,7 +4321,12 @@ fn read_loaded_analytics(db_path: &str, contact_id: &str) -> Option<LoadedAnalyt
         .ok()?;
 
     // status (may not exist if compute never ran)
-    let (last_computed_at, is_stale, last_compute_ms, last_error): (i64, bool, Option<i64>, Option<String>) = conn
+    let (last_computed_at, is_stale, last_compute_ms, last_error): (
+        i64,
+        bool,
+        Option<i64>,
+        Option<String>,
+    ) = conn
         .query_row(
             "SELECT last_computed_at, is_stale, last_compute_ms, last_error \
              FROM contact_analytics_status WHERE contact_id = ?1",
@@ -4036,8 +4490,7 @@ fn read_loaded_analytics(db_path: &str, contact_id: &str) -> Option<LoadedAnalyt
         serde_json::from_str(&ca.my_top_emojis_json).unwrap_or_default();
     let their_top_emojis: Vec<EmojiCount> =
         serde_json::from_str(&ca.their_top_emojis_json).unwrap_or_default();
-    let insights: Vec<LoadedInsight> =
-        serde_json::from_str(&pa.insights_json).unwrap_or_default();
+    let insights: Vec<LoadedInsight> = serde_json::from_str(&pa.insights_json).unwrap_or_default();
     let writing_milestones: Option<WritingMilestonesJson> =
         serde_json::from_str(&pa.writing_milestones_json).ok();
 

@@ -27,41 +27,127 @@ use std::collections::HashMap;
 /// SMS vocabulary.
 const LEXICON: &[(&str, i8)] = &[
     // Strong positive (+3)
-    ("love", 3), ("loved", 3), ("loving", 3), ("amazing", 3), ("awesome", 3),
-    ("excellent", 3), ("fantastic", 3), ("perfect", 3), ("brilliant", 3),
-    ("wonderful", 3), ("delighted", 3), ("ecstatic", 3), ("thrilled", 3),
+    ("love", 3),
+    ("loved", 3),
+    ("loving", 3),
+    ("amazing", 3),
+    ("awesome", 3),
+    ("excellent", 3),
+    ("fantastic", 3),
+    ("perfect", 3),
+    ("brilliant", 3),
+    ("wonderful", 3),
+    ("delighted", 3),
+    ("ecstatic", 3),
+    ("thrilled", 3),
     // Mid positive (+2)
-    ("good", 2), ("great", 2), ("nice", 2), ("happy", 2), ("glad", 2),
-    ("yes", 2), ("yay", 2), ("cool", 2), ("sweet", 2), ("excited", 2),
-    ("congrats", 2), ("congratulations", 2), ("thanks", 2), ("thank", 2),
-    ("appreciate", 2), ("proud", 2), ("hope", 2), ("hopeful", 2),
-    ("fun", 2), ("enjoy", 2), ("enjoying", 2), ("enjoyed", 2),
-    ("beautiful", 2), ("pretty", 2), ("lovely", 2), ("perfect", 2),
-    ("yes", 2), ("definitely", 2), ("sure", 2), ("absolutely", 2),
+    ("good", 2),
+    ("great", 2),
+    ("nice", 2),
+    ("happy", 2),
+    ("glad", 2),
+    ("yes", 2),
+    ("yay", 2),
+    ("cool", 2),
+    ("sweet", 2),
+    ("excited", 2),
+    ("congrats", 2),
+    ("congratulations", 2),
+    ("thanks", 2),
+    ("thank", 2),
+    ("appreciate", 2),
+    ("proud", 2),
+    ("hope", 2),
+    ("hopeful", 2),
+    ("fun", 2),
+    ("enjoy", 2),
+    ("enjoying", 2),
+    ("enjoyed", 2),
+    ("beautiful", 2),
+    ("pretty", 2),
+    ("lovely", 2),
+    ("definitely", 2),
+    ("sure", 2),
+    ("absolutely", 2),
     // Light positive (+1)
-    ("ok", 1), ("okay", 1), ("alright", 1), ("fine", 1), ("decent", 1),
-    ("agree", 1), ("yep", 1), ("yup", 1), ("yeah", 1), ("right", 1),
-    ("smile", 1), ("smiling", 1), ("laugh", 1), ("laughing", 1),
-    ("welcome", 1), ("please", 1),
+    ("ok", 1),
+    ("okay", 1),
+    ("alright", 1),
+    ("fine", 1),
+    ("decent", 1),
+    ("agree", 1),
+    ("yep", 1),
+    ("yup", 1),
+    ("yeah", 1),
+    ("right", 1),
+    ("smile", 1),
+    ("smiling", 1),
+    ("laugh", 1),
+    ("laughing", 1),
+    ("welcome", 1),
+    ("please", 1),
     // Light negative (-1)
-    ("eh", -1), ("meh", -1), ("whatever", -1), ("ugh", -1),
-    ("nope", -1), ("nah", -1), ("tired", -1), ("sleepy", -1),
-    ("bored", -1), ("annoyed", -1), ("annoying", -1),
+    ("eh", -1),
+    ("meh", -1),
+    ("whatever", -1),
+    ("ugh", -1),
+    ("nope", -1),
+    ("nah", -1),
+    ("tired", -1),
+    ("sleepy", -1),
+    ("bored", -1),
+    ("annoyed", -1),
+    ("annoying", -1),
     // Mid negative (-2)
-    ("bad", -2), ("sad", -2), ("upset", -2), ("angry", -2), ("mad", -2),
-    ("sorry", -2), ("guilty", -2), ("worried", -2), ("worry", -2),
-    ("stress", -2), ("stressed", -2), ("frustrated", -2), ("frustrating", -2),
-    ("hate", -2), ("hated", -2), ("hating", -2), ("dislike", -2),
-    ("ugh", -2), ("disappointed", -2), ("disappointing", -2),
-    ("sick", -2), ("hurt", -2), ("hurting", -2), ("sucks", -2), ("suck", -2),
-    ("broken", -2), ("broke", -2), ("lost", -2), ("losing", -2),
-    ("failed", -2), ("failure", -2), ("wrong", -2),
+    ("bad", -2),
+    ("sad", -2),
+    ("upset", -2),
+    ("angry", -2),
+    ("mad", -2),
+    ("sorry", -2),
+    ("guilty", -2),
+    ("worried", -2),
+    ("worry", -2),
+    ("stress", -2),
+    ("stressed", -2),
+    ("frustrated", -2),
+    ("frustrating", -2),
+    ("hate", -2),
+    ("hating", -2),
+    ("dislike", -2),
+    ("disappointed", -2),
+    ("disappointing", -2),
+    ("sick", -2),
+    ("hurt", -2),
+    ("hurting", -2),
+    ("sucks", -2),
+    ("suck", -2),
+    ("broken", -2),
+    ("broke", -2),
+    ("lost", -2),
+    ("losing", -2),
+    ("failed", -2),
+    ("failure", -2),
+    ("wrong", -2),
     // Strong negative (-3)
-    ("terrible", -3), ("awful", -3), ("horrible", -3), ("disgusting", -3),
-    ("furious", -3), ("devastated", -3), ("crushed", -3), ("miserable", -3),
-    ("nightmare", -3), ("worst", -3), ("hated", -3), ("hateful", -3),
-    ("trauma", -3), ("traumatized", -3), ("depressed", -3), ("depression", -3),
-    ("grief", -3), ("grieving", -3),
+    ("terrible", -3),
+    ("awful", -3),
+    ("horrible", -3),
+    ("disgusting", -3),
+    ("furious", -3),
+    ("devastated", -3),
+    ("crushed", -3),
+    ("miserable", -3),
+    ("nightmare", -3),
+    ("worst", -3),
+    ("hated", -3),
+    ("hateful", -3),
+    ("trauma", -3),
+    ("traumatized", -3),
+    ("depressed", -3),
+    ("depression", -3),
+    ("grief", -3),
+    ("grieving", -3),
 ];
 
 const NEGATORS: &[&str] = &["not", "no", "never", "nothing", "nobody", "nowhere"];
@@ -212,11 +298,7 @@ fn score_message(
             // Look back NEGATION_WINDOW tokens for a negator.
             let start = i.saturating_sub(NEGATION_WINDOW);
             let negated = tokens[start..i].iter().any(|t| neg.contains(t.as_str()));
-            let score = if negated {
-                -(base as f64)
-            } else {
-                base as f64
-            };
+            let score = if negated { -(base as f64) } else { base as f64 };
             total += score;
         }
     }
@@ -226,6 +308,17 @@ fn score_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lexicon_has_no_duplicate_keys() {
+        // Duplicate keys silently shadow each other when LEXICON is collected
+        // into a HashMap (last entry wins), so a word can end up with an
+        // unintended score. Keep every word listed exactly once.
+        let mut seen = std::collections::HashSet::new();
+        for (word, _) in LEXICON {
+            assert!(seen.insert(*word), "duplicate lexicon entry: {word:?}");
+        }
+    }
 
     fn am(rowid: i64, ts_ms: i64, sender: Participant, body: &str) -> AggregatorMessage {
         AggregatorMessage {
@@ -267,16 +360,20 @@ mod tests {
         let plain = score_message("good day", &lex, &neg);
         let negated = score_message("not good day", &lex, &neg);
         assert!(plain > 0.0);
-        assert!(negated < 0.0, "expected negation to flip sign, got {}", negated);
+        assert!(
+            negated < 0.0,
+            "expected negation to flip sign, got {}",
+            negated
+        );
     }
 
     #[test]
     fn timeline_aggregates_by_day_and_side() {
         let messages = vec![
-            am(1, 1_000_000_000_000, Participant::Me, "I love this"),       // +3
-            am(2, 1_000_000_001_000, Participant::Them, "thanks"),          // +2
-            am(3, 1_000_000_002_000, Participant::Me, "this is awful"),     // -3
-            am(4, 1_000_086_400_000, Participant::Me, "good morning"),      // +2 (next day)
+            am(1, 1_000_000_000_000, Participant::Me, "I love this"), // +3
+            am(2, 1_000_000_001_000, Participant::Them, "thanks"),    // +2
+            am(3, 1_000_000_002_000, Participant::Me, "this is awful"), // -3
+            am(4, 1_000_086_400_000, Participant::Me, "good morning"), // +2 (next day)
         ];
         let out = compute_sentiment_timeline(&messages, 0);
         assert!(out.days.len() >= 1);

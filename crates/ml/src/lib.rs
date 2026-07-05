@@ -4,9 +4,9 @@ use blake3::Hasher;
 #[cfg(feature = "onnx")]
 use ndarray::{Axis, IxDyn};
 #[cfg(feature = "onnx")]
-use ort::session::Session;
-#[cfg(feature = "onnx")]
 use ort::session::builder::GraphOptimizationLevel;
+#[cfg(feature = "onnx")]
+use ort::session::Session;
 #[cfg(feature = "onnx")]
 use ort::value::{Outlet, Tensor};
 use sha2::Digest;
@@ -113,8 +113,8 @@ impl EmbeddingService {
                     configure_tokenizer(&mut tokenizer, max_length)
                         .map_err(|e| AppError::Media(e.to_string()))?;
 
-                    let mut builder = Session::builder()
-                        .map_err(|e| AppError::Media(e.to_string()))?;
+                    let mut builder =
+                        Session::builder().map_err(|e| AppError::Media(e.to_string()))?;
                     if matches!(config.device, DevicePreference::Gpu) {
                         let provider =
                             ort::execution_providers::CUDAExecutionProvider::default().build();

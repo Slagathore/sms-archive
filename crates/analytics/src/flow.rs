@@ -137,9 +137,17 @@ pub fn build_conversation_flow(conversations: &[Conversation]) -> SankeyData {
     // Materialize links.
     let mut links: Vec<SankeyLink> = link_counts
         .into_iter()
-        .map(|((source, target), value)| SankeyLink { source, target, value })
+        .map(|((source, target), value)| SankeyLink {
+            source,
+            target,
+            value,
+        })
         .collect();
-    links.sort_by(|a, b| a.source.cmp(&b.source).then_with(|| a.target.cmp(&b.target)));
+    links.sort_by(|a, b| {
+        a.source
+            .cmp(&b.source)
+            .then_with(|| a.target.cmp(&b.target))
+    });
 
     SankeyData { nodes, links }
 }
@@ -184,7 +192,11 @@ mod tests {
             total_message_count: if is_missed { 1 } else { 2 },
             major_contributor: major,
             is_missed,
-            missed_by: if is_missed { Some(started.flip()) } else { None },
+            missed_by: if is_missed {
+                Some(started.flip())
+            } else {
+                None
+            },
             is_big_moment_static: is_big,
             is_big_moment_dynamic: false,
             reconnect_tier: 0,
@@ -210,11 +222,11 @@ mod tests {
     #[test]
     fn single_complete_convo_traces_one_path() {
         let convs = vec![convo(
-            Participant::Them,    // they started
-            Participant::Me,      // I had final reply
-            Participant::Me,      // I contributed more
-            false,                // not missed
-            false,                // not big
+            Participant::Them, // they started
+            Participant::Me,   // I had final reply
+            Participant::Me,   // I contributed more
+            false,             // not missed
+            false,             // not big
         )];
         let data = build_conversation_flow(&convs);
         // Path: started_them → everyday → contrib_me → final_me
@@ -225,7 +237,10 @@ mod tests {
         // Other column-0 nodes should not be present.
         assert!(find_node(&data, "started_me").is_none());
         // Links along the path.
-        assert_eq!(find_link(&data, "started_them", "everyday").unwrap().value, 1);
+        assert_eq!(
+            find_link(&data, "started_them", "everyday").unwrap().value,
+            1
+        );
         assert_eq!(find_link(&data, "everyday", "contrib_me").unwrap().value, 1);
         assert_eq!(find_link(&data, "contrib_me", "final_me").unwrap().value, 1);
     }
@@ -234,9 +249,9 @@ mod tests {
     fn missed_convo_terminates_at_no_reply() {
         let convs = vec![convo(
             Participant::Me,
-            Participant::Me,        // never replied to themselves but final = same
+            Participant::Me, // never replied to themselves but final = same
             Participant::Me,
-            true,                   // missed
+            true, // missed
             false,
         )];
         let data = build_conversation_flow(&convs);
@@ -257,12 +272,15 @@ mod tests {
             Participant::Them,
             Participant::Them,
             false,
-            true,    // big moment
+            true, // big moment
         )];
         let data = build_conversation_flow(&convs);
         assert_eq!(find_node(&data, "big_moment").unwrap().value, 1);
         assert!(find_node(&data, "everyday").is_none());
-        assert_eq!(find_link(&data, "started_me", "big_moment").unwrap().value, 1);
+        assert_eq!(
+            find_link(&data, "started_me", "big_moment").unwrap().value,
+            1
+        );
     }
 
     #[test]
@@ -273,9 +291,9 @@ mod tests {
             Participant::Them,
             Participant::Them,
             false,
-            false,    // static OFF
+            false, // static OFF
         );
-        c.is_big_moment_dynamic = true;    // dynamic ON
+        c.is_big_moment_dynamic = true; // dynamic ON
         let data = build_conversation_flow(&[c]);
         assert_eq!(find_node(&data, "big_moment").unwrap().value, 1);
     }
@@ -297,7 +315,10 @@ mod tests {
         assert_eq!(find_node(&data, "everyday").unwrap().value, 3);
         assert_eq!(find_node(&data, "contrib_me").unwrap().value, 3);
         assert_eq!(find_node(&data, "final_me").unwrap().value, 3);
-        assert_eq!(find_link(&data, "started_them", "everyday").unwrap().value, 3);
+        assert_eq!(
+            find_link(&data, "started_them", "everyday").unwrap().value,
+            3
+        );
     }
 
     #[test]
@@ -322,15 +343,36 @@ mod tests {
         assert_eq!(find_node(&data, "started_me").unwrap().value, 2);
         // Two divergent links from started_me.
         assert_eq!(find_link(&data, "started_me", "everyday").unwrap().value, 1);
-        assert_eq!(find_link(&data, "started_me", "big_moment").unwrap().value, 1);
+        assert_eq!(
+            find_link(&data, "started_me", "big_moment").unwrap().value,
+            1
+        );
     }
 
     #[test]
     fn nodes_are_sorted_by_column_then_id() {
         let convs = vec![
-            convo(Participant::Me, Participant::Them, Participant::Me, false, false),
-            convo(Participant::Them, Participant::Me, Participant::Them, false, true),
-            convo(Participant::Me, Participant::Me, Participant::Me, true, false),
+            convo(
+                Participant::Me,
+                Participant::Them,
+                Participant::Me,
+                false,
+                false,
+            ),
+            convo(
+                Participant::Them,
+                Participant::Me,
+                Participant::Them,
+                false,
+                true,
+            ),
+            convo(
+                Participant::Me,
+                Participant::Me,
+                Participant::Me,
+                true,
+                false,
+            ),
         ];
         let data = build_conversation_flow(&convs);
         // All column-0 nodes come before column-1, etc.

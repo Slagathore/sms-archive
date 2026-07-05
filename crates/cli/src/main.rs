@@ -11,8 +11,8 @@ use sms_ingest::{
     ingest_file, scan_boundaries, scan_boundaries_full, scan_boundaries_naive, IngestOptions,
     IngestProgress,
 };
-use sms_ml::{DevicePreference, EmbeddingConfig, EmbeddingService};
 use sms_media_process::{process_media, MediaProcessOptions};
+use sms_ml::{DevicePreference, EmbeddingConfig, EmbeddingService};
 use sms_search::{semantic_search, Fts5Backend, SearchBackend};
 use sms_types::MessageType;
 use std::fs::File;
@@ -449,6 +449,7 @@ enum Commands {
         input: PathBuf,
     },
     /// Build a Tantivy index from the database
+    #[cfg(feature = "tantivy")]
     TantivyBuild {
         /// Path to database
         #[arg(short, long)]
@@ -463,6 +464,7 @@ enum Commands {
         rebuild: bool,
     },
     /// Update Tantivy index with new rows
+    #[cfg(feature = "tantivy")]
     TantivyUpdate {
         /// Path to database
         #[arg(short, long)]
@@ -473,6 +475,7 @@ enum Commands {
         index_dir: PathBuf,
     },
     /// Search Tantivy index
+    #[cfg(feature = "tantivy")]
     TantivySearch {
         /// Index directory
         #[arg(short, long, default_value = "tantivy-index")]
@@ -1207,6 +1210,7 @@ fn main() -> Result<()> {
             println!("  full:   {} boundaries in {} ms", full.len(), full_ms);
             Ok(())
         }
+        #[cfg(feature = "tantivy")]
         Commands::TantivyBuild {
             db,
             index_dir,
@@ -1216,11 +1220,13 @@ fn main() -> Result<()> {
             println!("Tantivy index built at {}", index_dir.display());
             Ok(())
         }
+        #[cfg(feature = "tantivy")]
         Commands::TantivyUpdate { db, index_dir } => {
             sms_search::TantivyBackend::update_index(&db, &index_dir)?;
             println!("Tantivy index updated at {}", index_dir.display());
             Ok(())
         }
+        #[cfg(feature = "tantivy")]
         Commands::TantivySearch {
             index_dir,
             query,
@@ -1308,9 +1314,11 @@ fn main() -> Result<()> {
             contact_id,
             tz_offset_secs,
         } => run_analyze_contact(&db, &contact_id, tz_offset_secs),
-        Commands::AnalyticsShow { db, contact_id, json } => {
-            run_analytics_show(&db, &contact_id, json)
-        }
+        Commands::AnalyticsShow {
+            db,
+            contact_id,
+            json,
+        } => run_analytics_show(&db, &contact_id, json),
     }
 }
 
@@ -1348,7 +1356,9 @@ fn run_list_contacts(db: &Path, min_messages: i64, limit: usize, json: bool) -> 
             Ok(Row {
                 id: r.get(0)?,
                 display_name: r.get(1)?,
-                source: r.get::<_, Option<String>>(2)?.unwrap_or_else(|| "unknown".into()),
+                source: r
+                    .get::<_, Option<String>>(2)?
+                    .unwrap_or_else(|| "unknown".into()),
                 message_count: r.get(3)?,
             })
         })?
@@ -1478,7 +1488,10 @@ fn run_analytics_show(db: &Path, contact_id: &str, json: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!("==== analytics for {} ({}) ====", row.display_name, row.contact_id);
+    println!(
+        "==== analytics for {} ({}) ====",
+        row.display_name, row.contact_id
+    );
     println!();
     println!("Total conversations:    {}", row.total_conversations);
     println!("Your messages:          {}", row.my_messages);

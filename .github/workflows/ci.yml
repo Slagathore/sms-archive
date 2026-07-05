@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["main"]
+    branches: ["master", "main"]
   pull_request:
 
 jobs:
@@ -17,3 +17,18 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Test
         run: cargo test --workspace
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format check
+        run: cargo fmt --all -- --check
+      # #todo: tighten to `-- -D warnings` (the bar docs/SETUP.md mandates)
+      # once the ~113 existing clippy warnings are burned down.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets

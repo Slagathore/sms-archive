@@ -245,7 +245,10 @@ pub fn chi_square_2x2(observed_a: u32, total_a: u32, observed_b: u32, total_b: u
     let expected_a = total_observed as f64 * (total_a as f64 / total_population as f64);
     let expected_b = total_observed as f64 * (total_b as f64 / total_population as f64);
     let mut chi: f64 = 0.0;
-    for (obs, exp) in [(observed_a as f64, expected_a), (observed_b as f64, expected_b)] {
+    for (obs, exp) in [
+        (observed_a as f64, expected_a),
+        (observed_b as f64, expected_b),
+    ] {
         if exp > 0.0 {
             chi += (obs - exp).powi(2) / exp;
         }
@@ -303,7 +306,11 @@ fn build_compare(
         subject,
         verb,
         tier_word(tier_result.tier),
-        if tier_result.mine_higher { "they do" } else { "you do" }
+        if tier_result.mine_higher {
+            "they do"
+        } else {
+            "you do"
+        }
     );
     let detail = format_detail_compare(my, their, tier_result.ratio);
     Some(Insight {
@@ -322,7 +329,7 @@ fn rule_laughs(ctx: &InsightCtx, config: &EngineConfig) -> Option<Insight> {
         ctx,
         config,
         "laughs",
-        '\u{1F602}',    // 😂
+        '\u{1F602}', // 😂
         "laugh",
         ctx.contact.my_laugh_count,
         ctx.contact.their_laugh_count,
@@ -334,7 +341,7 @@ fn rule_apologies(ctx: &InsightCtx, config: &EngineConfig) -> Option<Insight> {
         ctx,
         config,
         "apologies",
-        '\u{1F54A}',    // 🕊️
+        '\u{1F54A}', // 🕊️
         "apologize",
         ctx.contact.my_apology_count,
         ctx.contact.their_apology_count,
@@ -346,7 +353,7 @@ fn rule_encouragement(ctx: &InsightCtx, config: &EngineConfig) -> Option<Insight
         ctx,
         config,
         "encouragement",
-        '\u{1F44F}',    // 👏
+        '\u{1F44F}', // 👏
         "send encouragement",
         ctx.contact.my_encouragement_count,
         ctx.contact.their_encouragement_count,
@@ -358,7 +365,7 @@ fn rule_questions(ctx: &InsightCtx, config: &EngineConfig) -> Option<Insight> {
         ctx,
         config,
         "questions",
-        '\u{2753}',     // ❓
+        '\u{2753}', // ❓
         "ask questions",
         ctx.contact.my_question_count,
         ctx.contact.their_question_count,
@@ -370,7 +377,7 @@ fn rule_messages_volume(ctx: &InsightCtx, config: &EngineConfig) -> Option<Insig
         ctx,
         config,
         "messages_volume",
-        '\u{1F4AC}',    // 💬
+        '\u{1F4AC}', // 💬
         "send messages",
         ctx.contact.my_message_count,
         ctx.contact.their_message_count,
@@ -382,7 +389,7 @@ fn rule_initiation(ctx: &InsightCtx, config: &EngineConfig) -> Option<Insight> {
         ctx,
         config,
         "initiation",
-        '\u{1F44B}',    // 👋
+        '\u{1F44B}', // 👋
         "initiate conversations",
         ctx.conversations_started_by_me,
         ctx.conversations_started_by_them,
@@ -447,7 +454,7 @@ fn rule_response_speed(ctx: &InsightCtx, config: &EngineConfig) -> Option<Insigh
     );
     Some(Insight {
         id: "response_speed",
-        icon: '\u{1F552}',    // 🕒
+        icon: '\u{1F552}', // 🕒
         headline,
         detail,
         tier,
@@ -508,7 +515,7 @@ fn rule_first_response_speed(ctx: &InsightCtx, config: &EngineConfig) -> Option<
     );
     Some(Insight {
         id: "first_response_speed",
-        icon: '\u{26A1}',    // ⚡
+        icon: '\u{26A1}', // ⚡
         headline,
         detail,
         tier,
@@ -533,7 +540,7 @@ fn rule_endings_even(ctx: &InsightCtx, config: &EngineConfig) -> Option<Insight>
     }
     Some(Insight {
         id: "endings_even",
-        icon: '\u{1F44B}',    // 👋
+        icon: '\u{1F44B}', // 👋
         headline: "Conversation endings are evenly shared".to_string(),
         detail: format!(
             "You closed {}, they closed {}",
@@ -553,7 +560,7 @@ fn rule_missed_even(ctx: &InsightCtx, config: &EngineConfig) -> Option<Insight> 
     }
     Some(Insight {
         id: "missed_even",
-        icon: '\u{1F47B}',    // 👻
+        icon: '\u{1F47B}', // 👻
         headline: "Your missed conversations are evenly matched".to_string(),
         detail: format!(
             "You missed {}, they missed {}",
@@ -578,12 +585,16 @@ fn rule_rarely_reconnect(ctx: &InsightCtx, config: &EngineConfig) -> Option<Insi
     let confidence = confidence_for_sample(ctx.total_conversations, config)?;
     Some(Insight {
         id: "rarely_reconnect",
-        icon: '\u{2744}',    // ❄
+        icon: '\u{2744}', // ❄
         headline: "You rarely reconnect after long silences".to_string(),
         detail: format!(
             "{} reconnect{} out of {} conversations ({:.1}%)",
             ctx.reconnect_count_total,
-            if ctx.reconnect_count_total == 1 { "" } else { "s" },
+            if ctx.reconnect_count_total == 1 {
+                ""
+            } else {
+                "s"
+            },
             ctx.total_conversations,
             pct * 100.0
         ),
@@ -759,7 +770,7 @@ mod tests {
     #[test]
     fn response_speed_rule_phrases_inverted() {
         let mut responses = ResponseMetrics::default();
-        responses.my_median_response_ms = Some(60_000);     // 1 min
+        responses.my_median_response_ms = Some(60_000); // 1 min
         responses.their_median_response_ms = Some(180_000); // 3 min
         let mut contact = ContactAggregates::default();
         contact.my_message_count = 500;
@@ -847,25 +858,32 @@ mod tests {
         contact.their_message_count = 1000;
         let responses = ResponseMetrics::default();
         let ctx = build_ctx(&contact, &responses);
-        let cfg = EngineConfig::default(); // max_per_category = 3
+        let cfg = EngineConfig {
+            max_per_category: 3,
+            ..EngineConfig::default()
+        };
         let out = compute_insights(&ctx, &cfg);
         let your_side_count = out
             .iter()
             .filter(|i| i.category == InsightCategory::YourSide)
             .count();
-        assert!(your_side_count <= 3, "expected ≤3 YourSide, got {}", your_side_count);
+        assert!(
+            your_side_count <= 3,
+            "expected ≤3 YourSide, got {}",
+            your_side_count
+        );
     }
 
     #[test]
     fn compute_insights_orders_yourside_then_theirside_then_shared() {
         let mut contact = ContactAggregates::default();
-        contact.my_laugh_count = 500;       // YourSide rule fires
+        contact.my_laugh_count = 500; // YourSide rule fires
         contact.their_laugh_count = 100;
-        contact.my_question_count = 100;    // TheirSide rule fires
+        contact.my_question_count = 100; // TheirSide rule fires
         contact.their_question_count = 500;
         let responses = ResponseMetrics::default();
         let mut ctx = build_ctx(&contact, &responses);
-        ctx.conversations_closed_by_me = 100;       // Shared rule fires (even)
+        ctx.conversations_closed_by_me = 100; // Shared rule fires (even)
         ctx.conversations_closed_by_them = 100;
         let cfg = EngineConfig::default();
         let out = compute_insights(&ctx, &cfg);

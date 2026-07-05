@@ -106,8 +106,7 @@ pub fn probe_cuda_support(clip_model: &Path) -> Result<bool> {
 
 impl ClipEncoder {
     pub fn new(clip_model: &Path, nsfw_weights: &Path) -> Result<Self> {
-        let mut builder = Session::builder()
-            .map_err(|e| AppError::Media(e.to_string()))?;
+        let mut builder = Session::builder().map_err(|e| AppError::Media(e.to_string()))?;
 
         if std::env::var("SMS_CLIP_USE_CUDA").ok().as_deref() == Some("1") {
             let provider = ort::execution_providers::CUDAExecutionProvider::default().build();
@@ -138,8 +137,8 @@ impl ClipEncoder {
         let classifier = NsfwClassifier::load(nsfw_weights)?;
 
         let mut preprocess = ClipPreprocessConfig::default();
-        let inferred_size = infer_input_size(&session)
-            .or_else(|| infer_input_size_from_preprocessor(clip_model));
+        let inferred_size =
+            infer_input_size(&session).or_else(|| infer_input_size_from_preprocessor(clip_model));
         if let Some(size) = inferred_size {
             preprocess.target_size = size.max(224);
         }
@@ -163,8 +162,8 @@ impl ClipEncoder {
 
         // Preprocess images -> [batch, 3, 336, 336]
         let tensor = clip_preprocess_batch(images, &self.preprocess)?;
-        let input = Tensor::<f32>::from_array(tensor)
-            .map_err(|e| AppError::Media(e.to_string()))?;
+        let input =
+            Tensor::<f32>::from_array(tensor).map_err(|e| AppError::Media(e.to_string()))?;
 
         // Run CLIP encoder
         let outputs = self

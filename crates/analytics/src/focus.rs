@@ -41,10 +41,7 @@ pub struct FocusOutput {
 /// `other_first_names` should be a deduplicated list of first names belonging
 /// to *other* contacts (not the pair under analysis). Lower-cased; we
 /// case-insensitive-match in the regex layer.
-pub fn compute_focus(
-    messages: &[AggregatorMessage],
-    other_first_names: &[String],
-) -> FocusOutput {
+pub fn compute_focus(messages: &[AggregatorMessage], other_first_names: &[String]) -> FocusOutput {
     if messages.is_empty() {
         return FocusOutput::default();
     }
@@ -197,7 +194,11 @@ mod tests {
         ];
         let out = compute_focus(&messages, &[]);
         let total = out.focus_me_pct + out.focus_them_pct + out.focus_other_pct;
-        assert!((total - 1.0).abs() < 1e-9, "expected sum=1.0, got {}", total);
+        assert!(
+            (total - 1.0).abs() < 1e-9,
+            "expected sum=1.0, got {}",
+            total
+        );
     }
 
     #[test]

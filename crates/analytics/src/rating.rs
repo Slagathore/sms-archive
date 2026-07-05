@@ -421,8 +421,8 @@ mod tests {
         assert!((symmetric_ratio(50, 50) - 1.0).abs() < 1e-9);
         assert!((symmetric_ratio(0, 100) - 0.0).abs() < 1e-9);
         assert!((symmetric_ratio(100, 0) - 0.0).abs() < 1e-9);
-        assert!((symmetric_ratio(25, 75) - 0.5).abs() < 1e-9);   // 25/50 = 0.5
-        assert_eq!(symmetric_ratio(0, 0), 0.5);                   // empty fallback
+        assert!((symmetric_ratio(25, 75) - 0.5).abs() < 1e-9); // 25/50 = 0.5
+        assert_eq!(symmetric_ratio(0, 0), 0.5); // empty fallback
     }
 
     // ---------- responsiveness ----------
@@ -435,7 +435,7 @@ mod tests {
     #[test]
     fn responsiveness_fast_replies_score_high() {
         let mut r = empty_response_metrics();
-        r.my_median_response_ms = Some(60_000);    // 1 min
+        r.my_median_response_ms = Some(60_000); // 1 min
         r.their_median_response_ms = Some(60_000);
         let score = score_responsiveness(&r);
         // Average median = 1 min. 100 - (60_000 / 300_000) * 20 = 100 - 4 = 96.
@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn responsiveness_slow_replies_score_low() {
         let mut r = empty_response_metrics();
-        r.my_median_response_ms = Some(8 * 60 * 60 * 1000);    // 8 hours
+        r.my_median_response_ms = Some(8 * 60 * 60 * 1000); // 8 hours
         r.their_median_response_ms = Some(8 * 60 * 60 * 1000);
         let score = score_responsiveness(&r);
         assert_eq!(score, 0, "8h median should be 0, got {}", score);
@@ -454,11 +454,15 @@ mod tests {
     #[test]
     fn responsiveness_mid_speed_score_in_middle() {
         let mut r = empty_response_metrics();
-        r.my_median_response_ms = Some(60 * 60 * 1000);        // 1 hour
+        r.my_median_response_ms = Some(60 * 60 * 1000); // 1 hour
         r.their_median_response_ms = Some(60 * 60 * 1000);
         let score = score_responsiveness(&r);
         // Avg median = 1 hour boundary → 50.
-        assert!((score as i32 - 50).abs() <= 1, "1h median should ≈ 50, got {}", score);
+        assert!(
+            (score as i32 - 50).abs() <= 1,
+            "1h median should ≈ 50, got {}",
+            score
+        );
     }
 
     // ---------- balance ----------
@@ -555,7 +559,12 @@ mod tests {
             score_consistency(&steady)
         };
         let bursty_score = score_consistency(&daily);
-        assert!(bursty_score < steady_score, "bursty ({}) should score lower than steady ({})", bursty_score, steady_score);
+        assert!(
+            bursty_score < steady_score,
+            "bursty ({}) should score lower than steady ({})",
+            bursty_score,
+            steady_score
+        );
     }
 
     // ---------- longevity ----------
@@ -571,7 +580,11 @@ mod tests {
     fn longevity_one_year_about_50() {
         let day_ms = 24 * 60 * 60 * 1000;
         let score = score_longevity(0, 365 * day_ms);
-        assert!((score as i32 - 50).abs() <= 1, "1 year should ≈ 50, got {}", score);
+        assert!(
+            (score as i32 - 50).abs() <= 1,
+            "1 year should ≈ 50, got {}",
+            score
+        );
     }
 
     #[test]
@@ -603,7 +616,7 @@ mod tests {
 
     #[test]
     fn reciprocity_low_sample_returns_neutral() {
-        let c = empty_contact();    // all zeros
+        let c = empty_contact(); // all zeros
         assert_eq!(score_reciprocity(&c), 50);
     }
 
@@ -618,17 +631,25 @@ mod tests {
         c.my_question_count = 50;
         c.their_question_count = 0;
         let score = score_mutual_effort(&c);
-        assert!(score < 10, "one-sided labor should score <10, got {}", score);
+        assert!(
+            score < 10,
+            "one-sided labor should score <10, got {}",
+            score
+        );
     }
 
     // ---------- compute_rating ----------
     #[test]
     fn rating_hidden_when_below_message_threshold() {
-        let c = empty_contact();    // 0 messages
+        let c = empty_contact(); // 0 messages
         let r = empty_response_metrics();
         let daily: [DailyBucket; 0] = [];
         let input = input_with(&c, &r, &daily, 0, 0, 0, 0, 0.0);
-        let out = compute_rating(&input, &RatingWeights::default(), &RatingThresholds::default());
+        let out = compute_rating(
+            &input,
+            &RatingWeights::default(),
+            &RatingThresholds::default(),
+        );
         assert_eq!(out.confidence, RatingConfidence::Hidden);
     }
 
@@ -640,7 +661,11 @@ mod tests {
         let r = empty_response_metrics();
         let daily: [DailyBucket; 0] = [];
         let input = input_with(&c, &r, &daily, 0, 0, 0, 0, 0.0);
-        let out = compute_rating(&input, &RatingWeights::default(), &RatingThresholds::default());
+        let out = compute_rating(
+            &input,
+            &RatingWeights::default(),
+            &RatingThresholds::default(),
+        );
         assert_eq!(out.confidence, RatingConfidence::Limited);
     }
 
@@ -652,7 +677,11 @@ mod tests {
         let r = empty_response_metrics();
         let daily: [DailyBucket; 0] = [];
         let input = input_with(&c, &r, &daily, 0, 0, 0, 0, 0.0);
-        let out = compute_rating(&input, &RatingWeights::default(), &RatingThresholds::default());
+        let out = compute_rating(
+            &input,
+            &RatingWeights::default(),
+            &RatingThresholds::default(),
+        );
         assert_eq!(out.confidence, RatingConfidence::Full);
     }
 
@@ -688,8 +717,16 @@ mod tests {
         }
         let day_ms = 24 * 60 * 60 * 1000i64;
         let input = input_with(&c, &r, &daily, 100, 100, 0, 5 * 365 * day_ms, 30.0);
-        let out = compute_rating(&input, &RatingWeights::default(), &RatingThresholds::default());
+        let out = compute_rating(
+            &input,
+            &RatingWeights::default(),
+            &RatingThresholds::default(),
+        );
         // Not exactly 100 — engagement uses media ratio etc — but should be very high.
-        assert!(out.overall >= 80, "fully optimized inputs should overall ≥80, got {}", out.overall);
+        assert!(
+            out.overall >= 80,
+            "fully optimized inputs should overall ≥80, got {}",
+            out.overall
+        );
     }
 }

@@ -4,11 +4,11 @@
 
 use image::DynamicImage;
 use indicatif::{ProgressBar, ProgressStyle};
+use rusqlite::OptionalExtension;
 use sms_clip::{ClipEncoder, ClipResult};
 use sms_db::{self, Database};
 use sms_errors::{AppError, Result};
 use sms_media::keyframes::extract_keyframes;
-use rusqlite::OptionalExtension;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -215,10 +215,11 @@ fn load_frames(
                 Ok(p) => p,
                 Err(_) => continue, // skip unresolvable files
             };
-            let (frames, temp_dir) = match extract_keyframes(&media_path, &task.mime_type, max_keyframes) {
-                Ok(result) => result,
-                Err(_) => continue, // skip corrupt/unreadable media
-            };
+            let (frames, temp_dir) =
+                match extract_keyframes(&media_path, &task.mime_type, max_keyframes) {
+                    Ok(result) => result,
+                    Err(_) => continue, // skip corrupt/unreadable media
+                };
             for frame in frames {
                 if let Ok(image) = image::open(&frame.path) {
                     images.push(image);
@@ -313,7 +314,9 @@ fn build_db_rows(
             frame_time_ms: meta.frame_time_ms,
             embedding: result.embedding.clone(),
         });
-        let entry = nsfw_map.entry(meta.attachment_id.clone()).or_insert_with(|| result.clone());
+        let entry = nsfw_map
+            .entry(meta.attachment_id.clone())
+            .or_insert_with(|| result.clone());
         if result.nsfw_score > entry.nsfw_score {
             *entry = result.clone();
         }

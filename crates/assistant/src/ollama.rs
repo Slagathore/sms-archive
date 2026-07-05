@@ -1,7 +1,23 @@
 use anyhow::Result;
 use serde_json::{json, Value};
+use std::sync::OnceLock;
+use std::time::Duration;
 
 use crate::ChatMessage;
+
+/// Shared HTTP agent with explicit timeouts. The default `ureq` agent has no
+/// overall timeout, so a hung Ollama server would block the worker thread
+/// forever with no way for the UI to recover. The overall cap is generous
+/// because large local models can legitimately take minutes to respond.
+fn http_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(10))
+            .timeout(Duration::from_secs(600))
+            .build()
+    })
+}
 
 pub fn send_ollama_chat(messages: &[ChatMessage], ollama_url: &str, model: &str) -> Result<String> {
     let response = send_ollama_chat_raw(messages, ollama_url, model, None)?;
@@ -40,7 +56,7 @@ fn send_ollama_chat_raw(
     if let Some(tools) = tools {
         body["tools"] = json!(tools);
     }
-    let response = ureq::post(&url).send_json(&body)?;
+    let response = http_agent().post(&url).send_json(&body)?;
     let json: Value = response.into_json()?;
     Ok(json)
 }

@@ -43,7 +43,10 @@ pub fn cleanup_temp_dir(dir: Option<TempDir>) {
     drop(dir);
 }
 
-fn extract_video_keyframes_ffmpeg(path: &Path, max_frames: usize) -> Result<(Vec<Keyframe>, TempDir)> {
+fn extract_video_keyframes_ffmpeg(
+    path: &Path,
+    max_frames: usize,
+) -> Result<(Vec<Keyframe>, TempDir)> {
     // #todo: add frame timestamp extraction via ffprobe for timeline-aware embeddings.
     let temp_dir = tempfile::tempdir()?;
     let pattern = temp_dir.path().join("frame_%04d.jpg");
@@ -65,10 +68,7 @@ fn extract_video_keyframes_ffmpeg(path: &Path, max_frames: usize) -> Result<(Vec
     let output = cmd.output()?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(AppError::Media(format!(
-            "ffmpeg failed: {}",
-            stderr.trim()
-        )));
+        return Err(AppError::Media(format!("ffmpeg failed: {}", stderr.trim())));
     }
 
     let mut frames: Vec<PathBuf> = fs::read_dir(temp_dir.path())
@@ -104,7 +104,9 @@ fn extract_video_thumbnail_fallback(
     let out_path = temp_dir.path().join("frame_0001.jpg");
     generate_thumbnail_for_mime(path, &out_path, 640, mime_type)?;
     if !out_path.exists() {
-        return Err(AppError::Media("Unable to extract fallback thumbnail".to_string()));
+        return Err(AppError::Media(
+            "Unable to extract fallback thumbnail".to_string(),
+        ));
     }
     Ok((
         vec![Keyframe {

@@ -223,8 +223,9 @@ pub fn generate_video_thumbnail(
                     let data = rgb_frame.data(0);
                     let width = rgb_frame.width();
                     let height = rgb_frame.height();
-                    let img = image::RgbImage::from_raw(width, height, data.to_vec())
-                        .ok_or_else(|| sms_errors::AppError::Media("Invalid video buffer".into()))?;
+                    let img = image::RgbImage::from_raw(width, height, data.to_vec()).ok_or_else(
+                        || sms_errors::AppError::Media("Invalid video buffer".into()),
+                    )?;
                     let dyn_img = image::DynamicImage::ImageRgb8(img);
                     let thumb = dyn_img.thumbnail(max_size, max_size);
                     thumb

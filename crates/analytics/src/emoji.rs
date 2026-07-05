@@ -157,7 +157,11 @@ mod tests {
         // Either ‘👍🏻’ as one cluster, or ‘👍’ and ‘🏻’ — depends on Unicode tables.
         // We just need exactly one entry summing to 1 representing this whole emoji.
         let total: u32 = counts.values().sum();
-        assert_eq!(total, 1, "skin-toned thumbs-up should count exactly once, got {:?}", counts);
+        assert_eq!(
+            total, 1,
+            "skin-toned thumbs-up should count exactly once, got {:?}",
+            counts
+        );
     }
 
     #[test]
@@ -179,7 +183,10 @@ mod tests {
     #[test]
     fn ascii_digits_are_not_emoji() {
         let counts = extract_emojis("number 1 and 2 and 3");
-        assert!(counts.is_empty(), "bare ASCII digits must not count as emoji");
+        assert!(
+            counts.is_empty(),
+            "bare ASCII digits must not count as emoji"
+        );
     }
 
     #[test]
@@ -197,17 +204,41 @@ mod tests {
         // Direct sanity check on the hardcoded special set. If this passes but
         // keycap_sequence_does_count fails, the bug is in grapheme segmentation,
         // not in classification.
-        assert!(is_emoji_cluster_special('\u{200D}'),  "ZWJ should be cluster-special");
-        assert!(is_emoji_cluster_special('\u{20E3}'),  "combining keycap should be cluster-special");
-        assert!(is_emoji_cluster_special('\u{FE0F}'),  "VS-16 should be cluster-special");
-        assert!(is_emoji_cluster_special('\u{1F1E6}'), "regional indicator A should be cluster-special");
-        assert!(is_emoji_cluster_special('\u{1F1FF}'), "regional indicator Z should be cluster-special");
-        assert!(is_emoji_cluster_special('\u{1F3FB}'), "skin tone-1 should be cluster-special");
-        assert!(is_emoji_cluster_special('\u{1F3FF}'), "skin tone-5 should be cluster-special");
+        assert!(
+            is_emoji_cluster_special('\u{200D}'),
+            "ZWJ should be cluster-special"
+        );
+        assert!(
+            is_emoji_cluster_special('\u{20E3}'),
+            "combining keycap should be cluster-special"
+        );
+        assert!(
+            is_emoji_cluster_special('\u{FE0F}'),
+            "VS-16 should be cluster-special"
+        );
+        assert!(
+            is_emoji_cluster_special('\u{1F1E6}'),
+            "regional indicator A should be cluster-special"
+        );
+        assert!(
+            is_emoji_cluster_special('\u{1F1FF}'),
+            "regional indicator Z should be cluster-special"
+        );
+        assert!(
+            is_emoji_cluster_special('\u{1F3FB}'),
+            "skin tone-1 should be cluster-special"
+        );
+        assert!(
+            is_emoji_cluster_special('\u{1F3FF}'),
+            "skin tone-5 should be cluster-special"
+        );
         // And things that should NOT be cluster-special:
         assert!(!is_emoji_cluster_special('a'));
         assert!(!is_emoji_cluster_special('1'));
-        assert!(!is_emoji_cluster_special('\u{1F602}'), "😂 is a regular emoji, not a special cluster element");
+        assert!(
+            !is_emoji_cluster_special('\u{1F602}'),
+            "😂 is a regular emoji, not a special cluster element"
+        );
     }
 
     #[test]

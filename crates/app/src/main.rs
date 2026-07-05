@@ -24,13 +24,13 @@ use std::fs;
 use std::io::{BufRead, Read, Write};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex,
 };
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime};
+use walkdir::WalkDir;
 
 mod analytics_tab;
 
@@ -169,7 +169,7 @@ struct SmsArchiveApp {
     pending_media_audit: Arc<Mutex<Option<MediaAuditSnapshot>>>,
     media_backfill_in_flight: bool,
     media_backfill_status: String,
-    pending_media_backfill: Arc<Mutex<Option<(String, bool)>>>,  // (status, is_done)
+    pending_media_backfill: Arc<Mutex<Option<(String, bool)>>>, // (status, is_done)
     clip_model_path: String,
     clip_nsfw_weights_path: String,
     clip_batch_size: usize,
@@ -344,8 +344,7 @@ impl Default for SmsArchiveApp {
         let assistant_model = "llama2".to_string();
         let vision_base_url = assistant_base_url.clone();
         let vision_model = "llava".to_string();
-        let vision_prompt =
-            "Describe this image and extract any visible text.".to_string();
+        let vision_prompt = "Describe this image and extract any visible text.".to_string();
         let clip_workers = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(4)
@@ -445,7 +444,9 @@ impl Default for SmsArchiveApp {
             media_nsfw_filter: MediaNsfwFilter::ShowAll,
             media_embed_prompt: "Summarize this image in one short sentence.".to_string(),
             media_embed_use_local: false,
-            media_nsfw_prompt: "Return JSON with fields: label ('NSFW' or 'SAFE') and score (0-1) for this image.".to_string(),
+            media_nsfw_prompt:
+                "Return JSON with fields: label ('NSFW' or 'SAFE') and score (0-1) for this image."
+                    .to_string(),
             media_nsfw_threshold: 0.5,
             media_keyframe_max: 6,
             media_embed_status: String::new(),
@@ -485,7 +486,7 @@ impl Default for SmsArchiveApp {
             pending_media_audit: Arc::new(Mutex::new(None)),
             media_backfill_in_flight: false,
             media_backfill_status: String::new(),
-            pending_media_backfill: Arc::new(Mutex::new(None)),  // (status, is_done)
+            pending_media_backfill: Arc::new(Mutex::new(None)), // (status, is_done)
             clip_model_path: String::new(),
             clip_nsfw_weights_path: String::new(),
             clip_batch_size: 32,
@@ -1190,7 +1191,11 @@ impl eframe::App for SmsArchiveApp {
             self.media_audit_in_flight = false;
             self.media_audit_status = "Media audit complete".to_string();
         }
-        let backfill_update = self.pending_media_backfill.lock().ok().and_then(|mut l| l.take());
+        let backfill_update = self
+            .pending_media_backfill
+            .lock()
+            .ok()
+            .and_then(|mut l| l.take());
         if let Some((status, done)) = backfill_update {
             self.media_backfill_status = status;
             if done {
@@ -1304,7 +1309,10 @@ impl eframe::App for SmsArchiveApp {
                     Ok(Ok(stats)) => {
                         self.clip_status = format!(
                             "CLIP complete: {} tasks, {} frames, {} NSFW updates in {} ms",
-                            stats.processed_tasks, stats.embedded_frames, stats.nsfw_updated, stats.elapsed_ms
+                            stats.processed_tasks,
+                            stats.embedded_frames,
+                            stats.nsfw_updated,
+                            stats.elapsed_ms
                         );
                     }
                     Ok(Err(err)) => {
@@ -4758,12 +4766,12 @@ impl eframe::App for SmsArchiveApp {
                 });
         }
 
-            self.maybe_persist_ui_settings();
+        self.maybe_persist_ui_settings();
     }
 
-        fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-            self.persist_ui_settings_now();
-        }
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.persist_ui_settings_now();
+    }
 }
 
 impl SmsArchiveApp {
@@ -5402,7 +5410,7 @@ impl SmsArchiveApp {
 
     fn autofill_clip_paths(&mut self) {
         let model_candidates = [
-            "ml/CLIP1/onnx/vision_model_fp16.onnx",
+            "ml/CLIP1/vision_model_fp16.onnx",
             "ml/clip-vit-l-14.onnx",
             "ml/clip-vit-l-14-336.onnx",
         ];
@@ -5442,7 +5450,11 @@ impl SmsArchiveApp {
         resolve_media_path_candidates(&root, rel_path)
             .into_iter()
             .find(|p| p.exists())
-            .or_else(|| resolve_media_path_candidates(&root, rel_path).into_iter().next())
+            .or_else(|| {
+                resolve_media_path_candidates(&root, rel_path)
+                    .into_iter()
+                    .next()
+            })
     }
 
     fn media_root_dir(&self) -> PathBuf {
@@ -6045,8 +6057,7 @@ impl SmsArchiveApp {
         if self.timeline_selected_addresses.is_empty() {
             self.timeline_filters.address.clear();
         } else {
-            let mut list: Vec<String> =
-                self.timeline_selected_addresses.iter().cloned().collect();
+            let mut list: Vec<String> = self.timeline_selected_addresses.iter().cloned().collect();
             list.sort();
             self.timeline_filters.address = list.join("|");
         }
@@ -6276,9 +6287,11 @@ impl SmsArchiveApp {
             let result = import_contacts_from_xml(&db_path, &xml_path);
             let status = match result {
                 Ok(count) => {
-                    let synced = sync_contact_names_from_xml(&db_path, &xml_path)
-                        .unwrap_or(0);
-                    format!("Imported {} contacts. Synced {} names from XML.", count, synced)
+                    let synced = sync_contact_names_from_xml(&db_path, &xml_path).unwrap_or(0);
+                    format!(
+                        "Imported {} contacts. Synced {} names from XML.",
+                        count, synced
+                    )
                 }
                 Err(e) => format!("XML contact import failed: {}", e),
             };
@@ -6697,7 +6710,7 @@ impl SmsArchiveApp {
             };
             let conn = db.connection();
             let mut results = Vec::new();
-                 let base_sql = "SELECT attachments.id, attachments.mime_type, attachments.file_path, attachments.thumbnail_path, \
+            let base_sql = "SELECT attachments.id, attachments.mime_type, attachments.file_path, attachments.thumbnail_path, \
                             attachments.message_id, messages.thread_id, messages.timestamp, messages.address, \
                             attachments.ocr_text, attachments.ocr_model, attachments.ocr_timestamp, \
                             attachments.vision_analysis, attachments.vision_model, attachments.vision_timestamp, \
@@ -6707,7 +6720,9 @@ impl SmsArchiveApp {
             let mut where_clauses = Vec::new();
             let mut params_vec: Vec<rusqlite::types::Value> = Vec::new();
             if !query.is_empty() {
-                where_clauses.push("(attachments.mime_type LIKE ? OR attachments.file_path LIKE ?)".to_string());
+                where_clauses.push(
+                    "(attachments.mime_type LIKE ? OR attachments.file_path LIKE ?)".to_string(),
+                );
                 let like = format!("%{}%", query);
                 params_vec.push(like.clone().into());
                 params_vec.push(like.into());
@@ -6741,32 +6756,32 @@ impl SmsArchiveApp {
             params_vec.push((offset as i64).into());
             if let Ok(mut stmt) = conn.prepare(&sql) {
                 let rows = stmt.query_map(rusqlite::params_from_iter(params_vec), |row| {
-                        Ok(AttachmentRow {
-                            id: row.get(0)?,
-                            mime_type: row.get(1)?,
-                            file_path: row.get(2)?,
-                            thumbnail_path: row.get(3)?,
-                            message_id: row.get(4)?,
-                            thread_id: row.get(5)?,
-                            timestamp: row.get(6)?,
-                            address: row.get(7)?,
-                            ocr_text: row.get(8)?,
-                            ocr_model: row.get(9)?,
-                            ocr_timestamp: row.get(10)?,
-                            vision_analysis: row.get(11)?,
-                            vision_model: row.get(12)?,
-                            vision_timestamp: row.get(13)?,
-                            nsfw_label: row.get(14)?,
-                            nsfw_score: row.get(15)?,
-                            nsfw_model: row.get(16)?,
-                            nsfw_timestamp: row.get(17)?,
-                        })
-                    });
-                    if let Ok(rows) = rows {
-                        for row in rows.flatten() {
-                            results.push(row);
-                        }
+                    Ok(AttachmentRow {
+                        id: row.get(0)?,
+                        mime_type: row.get(1)?,
+                        file_path: row.get(2)?,
+                        thumbnail_path: row.get(3)?,
+                        message_id: row.get(4)?,
+                        thread_id: row.get(5)?,
+                        timestamp: row.get(6)?,
+                        address: row.get(7)?,
+                        ocr_text: row.get(8)?,
+                        ocr_model: row.get(9)?,
+                        ocr_timestamp: row.get(10)?,
+                        vision_analysis: row.get(11)?,
+                        vision_model: row.get(12)?,
+                        vision_timestamp: row.get(13)?,
+                        nsfw_label: row.get(14)?,
+                        nsfw_score: row.get(15)?,
+                        nsfw_model: row.get(16)?,
+                        nsfw_timestamp: row.get(17)?,
+                    })
+                });
+                if let Ok(rows) = rows {
+                    for row in rows.flatten() {
+                        results.push(row);
                     }
+                }
             }
             // Query total count (same filters, no LIMIT/OFFSET)
             let count_sql = format!(
@@ -6786,7 +6801,11 @@ impl SmsArchiveApp {
                 }
             }
             let total: usize = conn
-                .query_row(&count_sql, rusqlite::params_from_iter(count_params), |row| row.get(0))
+                .query_row(
+                    &count_sql,
+                    rusqlite::params_from_iter(count_params),
+                    |row| row.get(0),
+                )
                 .unwrap_or(0);
 
             if let Ok(mut lock) = pending.lock() {
@@ -7216,19 +7235,20 @@ impl SmsArchiveApp {
                 let mut db_paths: HashSet<String> = HashSet::new();
                 let mut missing = 0usize;
                 let mut missing_samples = Vec::new();
-                let mut stmt = conn.prepare(
-                    "SELECT mime_type, file_path FROM attachments",
-                )?;
+                let mut stmt = conn.prepare("SELECT mime_type, file_path FROM attachments")?;
                 let mut rows = stmt.query([])?;
                 while let Some(row) = rows.next()? {
                     let mime: String = row.get(0)?;
                     let path: String = row.get(1)?;
                     let key = mime.split('/').next().unwrap_or("other").to_string();
                     *mime_counts.entry(key).or_insert(0) += 1;
-                    if let Some(normalized) = normalize_media_rel(&path, &db_path, media_root.as_ref()) {
+                    if let Some(normalized) =
+                        normalize_media_rel(&path, &db_path, media_root.as_ref())
+                    {
                         db_paths.insert(normalized);
                     }
-                    let resolved = resolve_media_path_with_root(&db_path, media_root.as_ref(), &path);
+                    let resolved =
+                        resolve_media_path_with_root(&db_path, media_root.as_ref(), &path);
                     if resolved.as_ref().map(|p| p.exists()).unwrap_or(false) == false {
                         missing += 1;
                         if missing_samples.len() < 10 {
@@ -7240,7 +7260,9 @@ impl SmsArchiveApp {
                 let mut media_files_total = 0usize;
                 let mut fs_unlinked_total = 0usize;
                 let mut fs_unlinked_samples = Vec::new();
-                let root = media_root.clone().unwrap_or_else(|| resolve_media_dir(&db_path));
+                let root = media_root
+                    .clone()
+                    .unwrap_or_else(|| resolve_media_dir(&db_path));
                 if root.exists() {
                     for entry in WalkDir::new(&root).into_iter().filter_map(|e| e.ok()) {
                         if entry.file_type().is_dir() {
@@ -7317,7 +7339,9 @@ impl SmsArchiveApp {
                     existing.insert(path.replace('\\', "/").to_lowercase());
                 }
 
-                let root = media_root.clone().unwrap_or_else(|| resolve_media_dir(&db_path));
+                let root = media_root
+                    .clone()
+                    .unwrap_or_else(|| resolve_media_dir(&db_path));
                 if !root.exists() {
                     return Ok("Media directory not found".to_string());
                 }
@@ -7338,7 +7362,8 @@ impl SmsArchiveApp {
                 // Build a hash->message_id lookup from existing attachments to try matching
                 let mut hash_to_msg: HashMap<Vec<u8>, String> = HashMap::new();
                 {
-                    let mut hash_stmt = conn.prepare("SELECT file_hash, message_id FROM attachments")?;
+                    let mut hash_stmt =
+                        conn.prepare("SELECT file_hash, message_id FROM attachments")?;
                     let mut rows = hash_stmt.query([])?;
                     while let Some(row) = rows.next()? {
                         let hash: Vec<u8> = row.get(0)?;
@@ -7400,7 +7425,10 @@ impl SmsArchiveApp {
                         continue;
                     }
                     let name_lower = entry.file_name().to_string_lossy().to_lowercase();
-                    if name_lower.ends_with(".db") || name_lower.ends_with(".json") || name_lower.starts_with('.') {
+                    if name_lower.ends_with(".db")
+                        || name_lower.ends_with(".json")
+                        || name_lower.starts_with('.')
+                    {
                         continue;
                     }
                     scanned += 1;
@@ -7453,7 +7481,10 @@ impl SmsArchiveApp {
                     let thumb_rel = {
                         let thumb_subdir = rel.split('/').next().unwrap_or("");
                         let thumb_filename = format!("{}.jpg", hex_hash_backfill(&hash));
-                        let thumb_path = root.join("thumbnails").join(thumb_subdir).join(&thumb_filename);
+                        let thumb_path = root
+                            .join("thumbnails")
+                            .join(thumb_subdir)
+                            .join(&thumb_filename);
                         if thumb_path.exists() {
                             Some(format!("thumbnails/{}/{}", thumb_subdir, thumb_filename))
                         } else {
@@ -7479,7 +7510,10 @@ impl SmsArchiveApp {
                     if scanned % 500 == 0 {
                         if let Ok(mut lock) = progress_pending.lock() {
                             *lock = Some((
-                                format!("Backfill: scanned {} files, {} new so far...", scanned, inserted),
+                                format!(
+                                    "Backfill: scanned {} files, {} new so far...",
+                                    scanned, inserted
+                                ),
                                 false,
                             ));
                         }
@@ -7520,8 +7554,7 @@ impl SmsArchiveApp {
             let model_path = self.clip_text_model_path.trim();
             let tokenizer_path = self.clip_text_tokenizer_path.trim();
             if model_path.is_empty() || tokenizer_path.is_empty() {
-                self.media_semantic_status =
-                    "Set CLIP text model + tokenizer".to_string();
+                self.media_semantic_status = "Set CLIP text model + tokenizer".to_string();
                 return;
             }
             self.media_semantic_in_flight = true;
@@ -7549,8 +7582,8 @@ impl SmsArchiveApp {
             };
             let query = self.media_semantic_query.trim().to_string();
             std::thread::spawn(move || {
-                let hits = media_semantic_search_clip(&db_path, config, &query, limit)
-                    .unwrap_or_default();
+                let hits =
+                    media_semantic_search_clip(&db_path, config, &query, limit).unwrap_or_default();
                 if let Ok(mut lock) = pending.lock() {
                     *lock = Some(hits);
                 }
@@ -7641,10 +7674,7 @@ impl SmsArchiveApp {
                                 *lock = Some(tags.models);
                             }
                             if let Ok(mut lock) = pending_log.lock() {
-                                lock.push(format!(
-                                    "Ollama models refreshed ({})",
-                                    base_url
-                                ));
+                                lock.push(format!("Ollama models refreshed ({})", base_url));
                             }
                         }
                         Err(err) => {
@@ -8237,10 +8267,7 @@ impl SmsArchiveApp {
             }
         }
         if !missing.is_empty() {
-            self.import_status = format!(
-                "XML file(s) not found: {}",
-                missing.join(", ")
-            );
+            self.import_status = format!("XML file(s) not found: {}", missing.join(", "));
             return;
         }
         let xml_size = xml_sizes.iter().copied().max().unwrap_or(0);
@@ -8808,8 +8835,7 @@ impl SmsArchiveApp {
         if self.clip_job.is_some() {
             return;
         }
-        if self.clip_model_path.trim().is_empty() || self.clip_nsfw_weights_path.trim().is_empty()
-        {
+        if self.clip_model_path.trim().is_empty() || self.clip_nsfw_weights_path.trim().is_empty() {
             self.clip_status =
                 "CLIP auto-run skipped: set CLIP model and NSFW weights first".to_string();
             return;
@@ -9894,11 +9920,9 @@ fn import_contacts_from_xml(db_path: &str, xml_path: &Path) -> Result<usize> {
             }
             Ok(Event::Eof) => break,
             Err(err) => {
-                return Err(sms_errors::AppError::External(format!(
-                    "XML parse error: {}",
-                    err
-                ))
-                .into())
+                return Err(
+                    sms_errors::AppError::External(format!("XML parse error: {}", err)).into(),
+                )
             }
             _ => {}
         }
@@ -10001,11 +10025,9 @@ fn extract_contact_names_from_xml(xml_path: &Path) -> Result<HashMap<String, Str
             }
             Ok(Event::Eof) => break,
             Err(err) => {
-                return Err(sms_errors::AppError::External(format!(
-                    "XML parse error: {}",
-                    err
-                ))
-                .into())
+                return Err(
+                    sms_errors::AppError::External(format!("XML parse error: {}", err)).into(),
+                )
             }
             _ => {}
         }
@@ -10040,7 +10062,9 @@ fn sync_contact_names_from_xml(db_path: &str, xml_path: &Path) -> Result<usize> 
                 address_index.insert(addr.clone(), (id.clone(), display.clone()));
                 let normalized = normalize_phone_like(&addr);
                 if !normalized.is_empty() {
-                    address_index.entry(normalized.clone()).or_insert((id.clone(), display.clone()));
+                    address_index
+                        .entry(normalized.clone())
+                        .or_insert((id.clone(), display.clone()));
                     if normalized.len() >= 10 {
                         let last10 = normalized[normalized.len() - 10..].to_string();
                         address_index.entry(last10).or_insert((id, display));
@@ -10069,9 +10093,7 @@ fn sync_contact_names_from_xml(db_path: &str, xml_path: &Path) -> Result<usize> 
         }
 
         if let Some((id, display)) = found {
-            if display.trim().is_empty()
-                || display == "Unknown"
-                || is_likely_phone_label(&display)
+            if display.trim().is_empty() || display == "Unknown" || is_likely_phone_label(&display)
             {
                 let _ = conn.execute(
                     "UPDATE contacts SET display_name = ?1, updated_at = strftime('%s','now') WHERE id = ?2",
@@ -10081,7 +10103,11 @@ fn sync_contact_names_from_xml(db_path: &str, xml_path: &Path) -> Result<usize> 
             }
         } else {
             let id = uuid::Uuid::new_v4().to_string();
-            let phone = if !normalized.is_empty() { normalized } else { addr.clone() };
+            let phone = if !normalized.is_empty() {
+                normalized
+            } else {
+                addr.clone()
+            };
             let _ = conn.execute(
                 "INSERT INTO contacts (id, display_name, phone_primary, updated_at) VALUES (?1, ?2, ?3, strftime('%s','now'))",
                 params![id, name, phone],
@@ -10119,7 +10145,9 @@ fn normalize_phone_like(value: &str) -> String {
 
 fn is_nullish_value(value: &str) -> bool {
     let trimmed = value.trim();
-    trimmed.is_empty() || trimmed.eq_ignore_ascii_case("null") || trimmed.eq_ignore_ascii_case("unknown")
+    trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("null")
+        || trimmed.eq_ignore_ascii_case("unknown")
 }
 
 fn is_likely_phone_label(value: &str) -> bool {
@@ -10635,11 +10663,7 @@ fn run_vision_ollama(
         .into_json()
         .map_err(|err| sms_errors::AppError::External(format!("Ollama JSON error: {}", err)))?;
     if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
-        return Err(sms_errors::AppError::External(format!(
-            "Ollama error: {}",
-            err
-        ))
-        .into());
+        return Err(sms_errors::AppError::External(format!("Ollama error: {}", err)).into());
     }
     let content = parsed
         .get("message")
@@ -10650,10 +10674,9 @@ fn run_vision_ollama(
         .trim()
         .to_string();
     if content.is_empty() {
-        return Err(sms_errors::AppError::External(
-            "Ollama response missing content".to_string(),
-        )
-        .into());
+        return Err(
+            sms_errors::AppError::External("Ollama response missing content".to_string()).into(),
+        );
     }
     let duration_ms = started.elapsed().as_millis();
     let annotated = format!("⏱ {:.2}s\n{}", (duration_ms as f64) / 1000.0, content);
@@ -11048,10 +11071,8 @@ fn lonlat_to_pixel(lat: f64, lon: f64, zoom: u8) -> (f64, f64) {
     let n = 2f64.powi(zoom as i32);
     let x = (lon + 180.0) / 360.0 * n * 256.0;
     let lat_rad = lat.to_radians();
-    let y = (1.0 - (lat_rad.tan() + 1.0 / lat_rad.cos()).ln() / std::f64::consts::PI)
-        / 2.0
-        * n
-        * 256.0;
+    let y =
+        (1.0 - (lat_rad.tan() + 1.0 / lat_rad.cos()).ln() / std::f64::consts::PI) / 2.0 * n * 256.0;
     (x, y)
 }
 
@@ -11315,7 +11336,6 @@ fn sanitize_ollama_embed_input(caption: &str, fallback: &str) -> String {
     }
     sanitized
 }
-
 
 fn hex_hash_backfill(hash: &blake3::Hash) -> String {
     let mut out = String::with_capacity(64);
@@ -11591,7 +11611,11 @@ fn cosine_similarity(query: &[f32], query_norm: f32, vec: &[f32]) -> f32 {
     if query.len() != vec.len() {
         return 0.0;
     }
-    let dot = query.iter().zip(vec.iter()).map(|(a, b)| a * b).sum::<f32>();
+    let dot = query
+        .iter()
+        .zip(vec.iter())
+        .map(|(a, b)| a * b)
+        .sum::<f32>();
     let denom = query_norm * l2_norm(vec);
     if denom == 0.0 {
         0.0
@@ -11698,13 +11722,18 @@ fn classify_nsfw_frames(
     for frame in frames {
         let payload = run_vision_ollama(&frame.path, base_url, model, prompt)?;
         let (_, body) = split_vision_analysis(&payload.analysis);
-        let (label, score) = parse_nsfw_response(&body).unwrap_or_else(|| ("UNKNOWN".to_string(), 0.0));
+        let (label, score) =
+            parse_nsfw_response(&body).unwrap_or_else(|| ("UNKNOWN".to_string(), 0.0));
         if score > best_score {
             best_score = score;
             let _ = normalize_nsfw_label(&label);
         }
     }
-    let final_label = if best_score >= threshold { "NSFW" } else { "SAFE" };
+    let final_label = if best_score >= threshold {
+        "NSFW"
+    } else {
+        "SAFE"
+    };
     Ok(NsfwPayload {
         label: final_label.to_string(),
         score: best_score.max(0.0),
@@ -11846,7 +11875,11 @@ fn resolve_media_path(db_path: &str, rel_path: &str) -> Option<std::path::PathBu
     resolve_media_path_candidates(&root, rel_path)
         .into_iter()
         .find(|p| p.exists())
-        .or_else(|| resolve_media_path_candidates(&root, rel_path).into_iter().next())
+        .or_else(|| {
+            resolve_media_path_candidates(&root, rel_path)
+                .into_iter()
+                .next()
+        })
 }
 
 fn resolve_media_path_with_root(

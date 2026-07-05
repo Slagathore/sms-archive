@@ -1,10 +1,10 @@
 use anyhow::Result;
 use chrono::TimeZone;
+use rusqlite::params;
 use serde_json::{json, Value};
 use sms_config::ResourceProfile;
 use sms_db::Database;
 use sms_search::{Fts5Backend, SearchBackend};
-use rusqlite::params;
 use std::path::Path;
 
 pub fn get_assistant_tools() -> Vec<Value> {
@@ -229,9 +229,33 @@ fn summarize_body(body: &str, max_len: usize) -> String {
     if trimmed.len() <= max_len {
         trimmed.to_string()
     } else {
-        let mut s = trimmed[..max_len].to_string();
-        s.push_str("…");
+        // Cut on a char boundary at or below max_len — a raw byte slice
+        // panics when a multi-byte character straddles the cutoff.
+        let cut = (0..=max_len)
+            .rev()
+            .find(|&i| trimmed.is_char_boundary(i))
+            .unwrap_or(0);
+        let mut s = trimmed[..cut].to_string();
+        s.push('…');
         s
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::summarize_body;
+
+    #[test]
+    fn summarize_body_truncates_on_char_boundary() {
+        // "ééééé" is 10 bytes / 5 chars; byte 5 falls mid-character.
+        let body = "ééééé";
+        let out = summarize_body(body, 5);
+        assert_eq!(out, "éé…");
+    }
+
+    #[test]
+    fn summarize_body_passes_short_bodies_through() {
+        assert_eq!(summarize_body("  hi  ", 160), "hi");
     }
 }
 

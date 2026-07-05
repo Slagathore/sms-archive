@@ -112,8 +112,16 @@ impl ConversationBuilder {
             end_time_ms: first.timestamp_ms,
             started_by: first.sender,
             final_reply_by: first.sender,
-            my_message_count: if matches!(first.sender, Participant::Me) { 1 } else { 0 },
-            their_message_count: if matches!(first.sender, Participant::Them) { 1 } else { 0 },
+            my_message_count: if matches!(first.sender, Participant::Me) {
+                1
+            } else {
+                0
+            },
+            their_message_count: if matches!(first.sender, Participant::Them) {
+                1
+            } else {
+                0
+            },
         }
     }
 
@@ -165,9 +173,9 @@ impl ConversationBuilder {
             is_missed,
             missed_by,
             is_big_moment_static: total >= config.big_moment_static_threshold,
-            is_big_moment_dynamic: false,   // populated in second pass
-            reconnect_tier: 0,              // populated in second pass
-            points: 0.0,                    // populated by scoring later
+            is_big_moment_dynamic: false, // populated in second pass
+            reconnect_tier: 0,            // populated in second pass
+            points: 0.0,                  // populated by scoring later
         }
     }
 }
@@ -185,7 +193,10 @@ fn enrich_pair_metrics(conversations: &mut Vec<Conversation>, config: &Segmentat
     // We want the percentile cutoff to be the value at or above which a
     // conversation counts as "big" for THIS pair. Sort message counts ascending
     // and pick the value at index `floor(N * pct/100)`.
-    let mut counts: Vec<u32> = conversations.iter().map(|c| c.total_message_count).collect();
+    let mut counts: Vec<u32> = conversations
+        .iter()
+        .map(|c| c.total_message_count)
+        .collect();
     counts.sort_unstable();
     let pct = config.big_moment_dynamic_percentile.min(100) as f64 / 100.0;
     let idx = ((counts.len() as f64) * pct).floor() as usize;
@@ -259,9 +270,9 @@ fn classify_reconnect_tier(
 
 /// Debug-only sanity check on caller-provided ordering.
 fn is_strictly_sorted(messages: &[MessageRef]) -> bool {
-    messages.windows(2).all(|w| {
-        (w[0].timestamp_ms, w[0].db_rowid) <= (w[1].timestamp_ms, w[1].db_rowid)
-    })
+    messages
+        .windows(2)
+        .all(|w| (w[0].timestamp_ms, w[0].db_rowid) <= (w[1].timestamp_ms, w[1].db_rowid))
 }
 
 #[cfg(test)]
@@ -379,19 +390,30 @@ mod tests {
         let mut messages = Vec::new();
         // 20 messages alternating, well within timeout.
         for i in 0..20 {
-            let sender = if i % 2 == 0 { Participant::Me } else { Participant::Them };
+            let sender = if i % 2 == 0 {
+                Participant::Me
+            } else {
+                Participant::Them
+            };
             messages.push(msg(i, i * 60_000, sender));
         }
         let out = segment_conversations("c1", &messages, &cfg());
         assert_eq!(out.len(), 1);
-        assert!(out[0].is_big_moment_static, "expected big moment at exactly threshold");
+        assert!(
+            out[0].is_big_moment_static,
+            "expected big moment at exactly threshold"
+        );
     }
 
     #[test]
     fn big_moment_static_does_not_fire_below_threshold() {
         let mut messages = Vec::new();
         for i in 0..19 {
-            let sender = if i % 2 == 0 { Participant::Me } else { Participant::Them };
+            let sender = if i % 2 == 0 {
+                Participant::Me
+            } else {
+                Participant::Them
+            };
             messages.push(msg(i, i * 60_000, sender));
         }
         let out = segment_conversations("c1", &messages, &cfg());
@@ -410,7 +432,11 @@ mod tests {
         for convo_idx in 0..10 {
             let n = if convo_idx == 9 { 50 } else { 5 };
             for i in 0..n {
-                let sender = if i % 2 == 0 { Participant::Me } else { Participant::Them };
+                let sender = if i % 2 == 0 {
+                    Participant::Me
+                } else {
+                    Participant::Them
+                };
                 rowid += 1;
                 messages.push(msg(rowid, t, sender));
                 t += 60_000; // 1 min between within a convo
@@ -421,7 +447,10 @@ mod tests {
         let out = segment_conversations("c1", &messages, &cfg());
         assert_eq!(out.len(), 10);
         let big_dynamic_count = out.iter().filter(|c| c.is_big_moment_dynamic).count();
-        assert_eq!(big_dynamic_count, 1, "exactly one convo should be dynamic-big");
+        assert_eq!(
+            big_dynamic_count, 1,
+            "exactly one convo should be dynamic-big"
+        );
         assert!(out[9].is_big_moment_dynamic);
     }
 
@@ -435,7 +464,11 @@ mod tests {
         let mut t = 0i64;
         for n in [1, 2, 3] {
             for i in 0..n {
-                let sender = if i % 2 == 0 { Participant::Me } else { Participant::Them };
+                let sender = if i % 2 == 0 {
+                    Participant::Me
+                } else {
+                    Participant::Them
+                };
                 rowid += 1;
                 messages.push(msg(rowid, t, sender));
                 t += 60_000;
@@ -465,10 +498,10 @@ mod tests {
         let mut rowid = 0i64;
         let timestamps = [
             0,
-            12 * 60 * 60 * 1000,                              // +12h
-            36 * 60 * 60 * 1000,                              // +24h after prev
-            (36 + 7 * 24) * 60 * 60 * 1000,                   // +7d
-            (36 + 7 * 24 + 30 * 24) * 60 * 60 * 1000,         // +30d
+            12 * 60 * 60 * 1000,                      // +12h
+            36 * 60 * 60 * 1000,                      // +24h after prev
+            (36 + 7 * 24) * 60 * 60 * 1000,           // +7d
+            (36 + 7 * 24 + 30 * 24) * 60 * 60 * 1000, // +30d
         ];
         for ts in timestamps {
             rowid += 1;
@@ -476,11 +509,17 @@ mod tests {
         }
         let out = segment_conversations("c1", &messages, &cfg());
         assert_eq!(out.len(), 5);
-        assert_eq!(out[0].reconnect_tier, 0, "first convo always tier 0 (no preceding gap)");
+        assert_eq!(
+            out[0].reconnect_tier, 0,
+            "first convo always tier 0 (no preceding gap)"
+        );
         assert_eq!(out[1].reconnect_tier, 0, "12h < 24h → tier 0");
         assert_eq!(out[2].reconnect_tier, 1, "24h exactly → tier 1");
         assert_eq!(out[3].reconnect_tier, 2, "7d → tier 2");
-        assert_eq!(out[4].reconnect_tier, 4, "30d gap on a 7d-median pair → tier 4");
+        assert_eq!(
+            out[4].reconnect_tier, 4,
+            "30d gap on a 7d-median pair → tier 4"
+        );
     }
 
     #[test]
@@ -526,7 +565,10 @@ mod tests {
         let out = segment_conversations("c1", &messages, &cfg());
         assert_eq!(out.len(), 1);
         let c = &out[0];
-        assert_eq!(c.total_message_count, 2, "both same-sender same-ts messages must count");
+        assert_eq!(
+            c.total_message_count, 2,
+            "both same-sender same-ts messages must count"
+        );
         assert_eq!(c.my_message_count, 2);
         assert_eq!(c.their_message_count, 0);
         assert!(c.is_missed);
@@ -544,7 +586,7 @@ mod tests {
         assert_eq!(out.len(), 1);
         let c = &out[0];
         assert_eq!(c.total_message_count, 2);
-        assert_eq!(c.started_by, Participant::Me);     // earlier rowid wins for "started by"
+        assert_eq!(c.started_by, Participant::Me); // earlier rowid wins for "started by"
         assert_eq!(c.final_reply_by, Participant::Them); // later rowid is "final"
         assert!(!c.is_missed);
     }
@@ -555,11 +597,19 @@ mod tests {
         let mut messages = Vec::new();
         let half_hour_ms = 30 * 60 * 1000;
         for i in 0..20 {
-            let sender = if i % 2 == 0 { Participant::Me } else { Participant::Them };
+            let sender = if i % 2 == 0 {
+                Participant::Me
+            } else {
+                Participant::Them
+            };
             messages.push(msg(i, i * half_hour_ms, sender));
         }
         let out = segment_conversations("c1", &messages, &cfg());
-        assert_eq!(out.len(), 1, "10-hour run with 30-min gaps must stay one convo");
+        assert_eq!(
+            out.len(),
+            1,
+            "10-hour run with 30-min gaps must stay one convo"
+        );
         assert!(out[0].is_big_moment_static);
     }
 

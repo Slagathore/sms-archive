@@ -201,9 +201,8 @@ pub fn compute_aggregates(
     let mut daily: HashMap<String, DailyAccum> = HashMap::new();
     let mut hourly: HashMap<(u8, u8), u32> = HashMap::new();
 
-    let tz = FixedOffset::east_opt(tz_offset_secs).unwrap_or_else(|| {
-        FixedOffset::east_opt(0).expect("UTC offset is always valid")
-    });
+    let tz = FixedOffset::east_opt(tz_offset_secs)
+        .unwrap_or_else(|| FixedOffset::east_opt(0).expect("UTC offset is always valid"));
 
     for msg in messages {
         let acc: &mut SideAccum = match msg.sender {
@@ -373,7 +372,13 @@ pub fn compute_aggregates(
 mod tests {
     use super::*;
 
-    fn m(rowid: i64, ts_ms: i64, sender: Participant, body: &str, mimes: Vec<&str>) -> AggregatorMessage {
+    fn m(
+        rowid: i64,
+        ts_ms: i64,
+        sender: Participant,
+        body: &str,
+        mimes: Vec<&str>,
+    ) -> AggregatorMessage {
         AggregatorMessage {
             db_rowid: rowid,
             timestamp_ms: ts_ms,
@@ -407,8 +412,8 @@ mod tests {
     #[test]
     fn word_and_char_counts_correct() {
         let messages = vec![
-            m(1, 1_000, Participant::Me, "hello world", vec![]),         // 2 words, 11 chars
-            m(2, 2_000, Participant::Them, "hi", vec![]),                // 1 word, 2 chars
+            m(1, 1_000, Participant::Me, "hello world", vec![]), // 2 words, 11 chars
+            m(2, 2_000, Participant::Them, "hi", vec![]),        // 1 word, 2 chars
         ];
         let out = compute_aggregates(&messages, 0, 5);
         assert_eq!(out.contact.my_word_count, 2);
@@ -419,9 +424,13 @@ mod tests {
 
     #[test]
     fn unique_words_dedupe_case_insensitively() {
-        let messages = vec![
-            m(1, 1_000, Participant::Me, "Hello hello HELLO world", vec![]),
-        ];
+        let messages = vec![m(
+            1,
+            1_000,
+            Participant::Me,
+            "Hello hello HELLO world",
+            vec![],
+        )];
         let out = compute_aggregates(&messages, 0, 5);
         // total tokens: 4. unique (lowered): {"hello", "world"} = 2.
         assert_eq!(out.contact.my_word_count, 4);
@@ -431,11 +440,23 @@ mod tests {
     #[test]
     fn media_attachments_classified_by_mime() {
         let messages = vec![
-            m(1, 1_000, Participant::Me, "", vec!["image/jpeg", "image/png"]),
+            m(
+                1,
+                1_000,
+                Participant::Me,
+                "",
+                vec!["image/jpeg", "image/png"],
+            ),
             m(2, 2_000, Participant::Me, "", vec!["video/mp4"]),
             m(3, 3_000, Participant::Me, "", vec!["audio/mp3"]),
             m(4, 4_000, Participant::Me, "", vec!["image/gif"]),
-            m(5, 5_000, Participant::Them, "", vec!["image/heic", "image/heic", "image/heic"]),
+            m(
+                5,
+                5_000,
+                Participant::Them,
+                "",
+                vec!["image/heic", "image/heic", "image/heic"],
+            ),
         ];
         let out = compute_aggregates(&messages, 0, 5);
         assert_eq!(out.contact.my_image_count, 2);
@@ -448,7 +469,13 @@ mod tests {
     #[test]
     fn link_count_per_message_not_per_url() {
         let messages = vec![
-            m(1, 1_000, Participant::Me, "check https://a.com and https://b.com", vec![]),
+            m(
+                1,
+                1_000,
+                Participant::Me,
+                "check https://a.com and https://b.com",
+                vec![],
+            ),
             m(2, 2_000, Participant::Me, "no link here", vec![]),
             m(3, 3_000, Participant::Them, "www.example.com", vec![]),
         ];
@@ -483,8 +510,8 @@ mod tests {
             m(3, 3_000, Participant::Them, "🤣🤣🤣", vec![]),
         ];
         let out = compute_aggregates(&messages, 0, 5);
-        assert_eq!(out.contact.my_emoji_total, 3);     // 2 + 1
-        assert_eq!(out.contact.their_emoji_total, 3);   // 3
+        assert_eq!(out.contact.my_emoji_total, 3); // 2 + 1
+        assert_eq!(out.contact.their_emoji_total, 3); // 3
         let my_top = &out.contact.my_top_emojis;
         assert_eq!(my_top[0].emoji, "😂");
         assert_eq!(my_top[0].count, 2);
@@ -520,9 +547,7 @@ mod tests {
         // ts = 2024-03-21T15:30:00Z. UTC+0 → Thursday 15:00.
         // chrono num_days_from_sunday: Sun=0, Mon=1, ..., Thu=4, Sat=6.
         let ts: i64 = 1711034999_000; // 2024-03-21T15:29:59Z (close enough)
-        let messages = vec![
-            m(1, ts, Participant::Me, "hi", vec![]),
-        ];
+        let messages = vec![m(1, ts, Participant::Me, "hi", vec![])];
         let out = compute_aggregates(&messages, 0, 5);
         assert_eq!(out.hourly.len(), 1);
         let h = &out.hourly[0];
@@ -535,16 +560,28 @@ mod tests {
     fn daily_words_and_media_accumulate() {
         let messages = vec![
             m(1, 1_000, Participant::Me, "two words", vec!["image/jpeg"]),
-            m(2, 60_000, Participant::Me, "one", vec!["image/jpeg", "image/png"]),
-            m(3, 120_000, Participant::Them, "many many many words", vec![]),
+            m(
+                2,
+                60_000,
+                Participant::Me,
+                "one",
+                vec!["image/jpeg", "image/png"],
+            ),
+            m(
+                3,
+                120_000,
+                Participant::Them,
+                "many many many words",
+                vec![],
+            ),
         ];
         let out = compute_aggregates(&messages, 0, 5);
         // All three on the same UTC date (1970-01-01).
         assert_eq!(out.daily.len(), 1);
         let day = &out.daily[0];
-        assert_eq!(day.my_words, 3);    // 2 + 1
+        assert_eq!(day.my_words, 3); // 2 + 1
         assert_eq!(day.their_words, 4);
-        assert_eq!(day.my_media, 3);     // 1 + 2 attachments
+        assert_eq!(day.my_media, 3); // 1 + 2 attachments
         assert_eq!(day.their_media, 0);
     }
 
@@ -559,7 +596,13 @@ mod tests {
         let out2 = compute_aggregates(&[m3, m1, m2], 0, 5);
 
         assert_eq!(out1.contact.my_message_count, out2.contact.my_message_count);
-        assert_eq!(out1.contact.my_question_count, out2.contact.my_question_count);
-        assert_eq!(out1.contact.their_image_count, out2.contact.their_image_count);
+        assert_eq!(
+            out1.contact.my_question_count,
+            out2.contact.my_question_count
+        );
+        assert_eq!(
+            out1.contact.their_image_count,
+            out2.contact.their_image_count
+        );
     }
 }

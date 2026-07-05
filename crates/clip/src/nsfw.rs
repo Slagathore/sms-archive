@@ -71,9 +71,7 @@ impl NsfwClassifier {
     pub fn score_batch(&mut self, embeddings: &[Vec<f32>]) -> Result<Vec<NsfwScore>> {
         match self {
             NsfwClassifier::Onnx(classifier) => classifier.score_batch(embeddings),
-            NsfwClassifier::Probe(probe) => {
-                embeddings.iter().map(|e| probe.score(e)).collect()
-            }
+            NsfwClassifier::Probe(probe) => embeddings.iter().map(|e| probe.score(e)).collect(),
         }
     }
 }
@@ -103,8 +101,8 @@ impl Clone for OnnxClassifier {
 
 impl OnnxClassifier {
     pub fn load(path: &Path) -> Result<Self> {
-        let mut builder = Session::builder()
-            .map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
+        let mut builder =
+            Session::builder().map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
 
         // Use CUDA if available
         if std::env::var("SMS_CLIP_USE_CUDA").ok().as_deref() == Some("1") {
@@ -142,9 +140,10 @@ impl OnnxClassifier {
     #[allow(dead_code)]
     pub fn score(&mut self, embedding: &[f32]) -> Result<NsfwScore> {
         let scores = self.score_batch(&[embedding.to_vec()])?;
-        scores.into_iter().next().ok_or_else(|| {
-            AppError::Media("NSFW model returned no results".to_string())
-        })
+        scores
+            .into_iter()
+            .next()
+            .ok_or_else(|| AppError::Media("NSFW model returned no results".to_string()))
     }
 
     pub fn score_batch(&mut self, embeddings: &[Vec<f32>]) -> Result<Vec<NsfwScore>> {
@@ -182,11 +181,9 @@ impl OnnxClassifier {
         // Output is [batch, 1] - extract scores
         let scores: Vec<NsfwScore> = array
             .iter()
-            .map(|&score| {
-                NsfwScore {
-                    label: label_from_score(score),
-                    score,
-                }
+            .map(|&score| NsfwScore {
+                label: label_from_score(score),
+                score,
             })
             .collect();
 
@@ -249,7 +246,10 @@ fn load_safetensors(path: &Path) -> Result<NsfwProbe> {
     let bias = find_tensor(&tensors, &["bias", "linear.bias", "classifier.bias"])?;
     let weight = tensor_to_array2(weight)?;
     let bias = tensor_to_array1(bias)?;
-    Ok(NsfwProbe { weights: weight, bias })
+    Ok(NsfwProbe {
+        weights: weight,
+        bias,
+    })
 }
 
 fn load_npz(path: &Path) -> Result<NsfwProbe> {
@@ -265,7 +265,10 @@ fn load_npz(path: &Path) -> Result<NsfwProbe> {
         .or_else(|_| npz.by_name("linear.bias.npy"))
         .or_else(|_| npz.by_name("classifier.bias.npy"))
         .map_err(|e| AppError::Media(format!("NPZ bias error: {}", e)))?;
-    Ok(NsfwProbe { weights: weight, bias })
+    Ok(NsfwProbe {
+        weights: weight,
+        bias,
+    })
 }
 
 fn find_tensor<'a>(tensors: &'a SafeTensors, keys: &[&str]) -> Result<TensorView<'a>> {
@@ -295,8 +298,7 @@ fn tensor_to_array1(tensor: TensorView<'_>) -> Result<Array1<f32>> {
     }
     let data = tensor.data();
     let data = bytemuck::cast_slice::<u8, f32>(data);
-    Array1::from_shape_vec(shape[0], data.to_vec())
-        .map_err(|err| AppError::Media(err.to_string()))
+    Array1::from_shape_vec(shape[0], data.to_vec()).map_err(|err| AppError::Media(err.to_string()))
 }
 
 fn sigmoid(x: f32) -> f32 {
