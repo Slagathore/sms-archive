@@ -93,14 +93,20 @@ fn infer_input_size_from_preprocessor(model_path: &Path) -> Option<u32> {
 
 pub fn probe_cuda_support(clip_model: &Path) -> Result<bool> {
     let builder = Session::builder().map_err(|e| AppError::Media(e.to_string()))?;
-    let provider = ort::execution_providers::CUDAExecutionProvider::default().build();
+    // error_on_failure: by default ort swallows a failed CUDA registration
+    // and silently falls back to CPU, which made this probe report
+    // "available" on machines with no CUDA at all.
+    let provider = ort::execution_providers::CUDAExecutionProvider::default()
+        .build()
+        .error_on_failure();
     let mut builder = match builder.with_execution_providers([provider]) {
         Ok(updated) => updated,
         Err(_) => return Ok(false),
     };
-    let _session = builder
-        .commit_from_file(clip_model)
-        .map_err(|e| AppError::Media(e.to_string()))?;
+    if builder.commit_from_file(clip_model).is_err() {
+        // Registration errors can also surface at session creation.
+        return Ok(false);
+    }
     Ok(true)
 }
 

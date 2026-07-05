@@ -120,6 +120,10 @@ struct Budget {
     limit: usize,
     current: Mutex<usize>,
     cvar: Condvar,
+    /// Set when the consumer (writer) dies on a hard error. Parsers blocked
+    /// in `acquire` must wake and proceed to their channel send (which then
+    /// fails fast) instead of waiting forever on releases that never come.
+    failed: AtomicBool,
 }
 
 #[derive(Clone)]
@@ -154,30 +158,46 @@ impl Budget {
             limit,
             current: Mutex::new(0),
             cvar: Condvar::new(),
+            failed: AtomicBool::new(false),
         }
     }
 
-    fn acquire(&self, mut size: usize) {
+    /// Clamp oversized reservations the same way in acquire and release —
+    /// they must agree or the accounting drifts and backpressure erodes.
+    fn clamp(&self, size: usize) -> usize {
+        size.min(self.limit)
+    }
+
+    fn acquire(&self, size: usize) {
+        let size = self.clamp(size);
         if size == 0 {
             return;
         }
-        if size > self.limit {
-            size = self.limit;
-        }
         let mut cur = self.current.lock().unwrap();
-        while *cur + size > self.limit {
+        while *cur + size > self.limit && !self.failed.load(Ordering::Relaxed) {
             cur = self.cvar.wait(cur).unwrap();
         }
         *cur += size;
     }
 
     fn release(&self, size: usize) {
+        let size = self.clamp(size);
         if size == 0 {
             return;
         }
         let mut cur = self.current.lock().unwrap();
         *cur = cur.saturating_sub(size);
         self.cvar.notify_one();
+    }
+
+    /// Poison the budget after a fatal writer error: wake every blocked
+    /// producer so the pipeline unwinds via failed channel sends instead of
+    /// deadlocking on a consumer that will never release bytes again.
+    fn fail(&self) {
+        self.failed.store(true, Ordering::Relaxed);
+        // Lock to serialize with waiters entering the condvar wait.
+        let _cur = self.current.lock().unwrap();
+        self.cvar.notify_all();
     }
 }
 
@@ -235,7 +255,7 @@ pub fn ingest_file(input: &Path, db_path: &Path, options: &IngestOptions) -> Res
     let writer_mode = options.writer_mode;
     let writer_progress = options.progress.clone();
     let writer_handle = thread::spawn(move || {
-        run_writer(
+        let result = run_writer(
             rx,
             &writer_db_path,
             batch_size,
@@ -244,7 +264,14 @@ pub fn ingest_file(input: &Path, db_path: &Path, options: &IngestOptions) -> Res
             writer_checkpoint,
             writer_mode,
             writer_progress,
-        )
+        );
+        if result.is_err() {
+            // Wake producers blocked on the byte budget; with the receiver
+            // dropped their next send fails and the pipeline unwinds instead
+            // of deadlocking (nobody will release budget bytes again).
+            writer_budget.fail();
+        }
+        result
     });
 
     let input_dir = input.parent().map(|p| p.to_path_buf());
@@ -502,7 +529,17 @@ fn flush_batch(
     progress: Option<&Arc<IngestProgress>>,
 ) -> Result<()> {
     let messages: Vec<Message> = batch.iter().map(|i| i.msg.clone()).collect();
-    let inserted = writer.insert_batch(&messages)?;
+    let inserted = match writer.insert_batch(&messages) {
+        Ok(n) => n,
+        Err(err) => {
+            // Free the reserved bytes even on failure so producers aren't
+            // stranded on the budget while the error propagates.
+            for item in batch.drain(..) {
+                budget.release(item.size);
+            }
+            return Err(err);
+        }
+    };
 
     for item in batch.drain(..) {
         budget.release(item.size);

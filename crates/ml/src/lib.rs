@@ -324,7 +324,14 @@ fn embed_onnx(
                 mask_name.as_str() => attention_mask
             })
             .map_err(|e| AppError::Media(e.to_string()))?,
-        (None, _) => backend
+        (None, Some(type_name)) => backend
+            .session
+            .run(ort::inputs! {
+                backend.input_ids_name.as_str() => input_ids,
+                type_name.as_str() => token_type_ids
+            })
+            .map_err(|e| AppError::Media(e.to_string()))?,
+        (None, None) => backend
             .session
             .run(ort::inputs! {
                 backend.input_ids_name.as_str() => input_ids

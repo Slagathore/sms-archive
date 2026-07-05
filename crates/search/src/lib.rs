@@ -13,6 +13,17 @@ pub trait SearchBackend {
     fn search(&self, query: &str, limit: usize) -> Result<Vec<Message>>;
 }
 
+/// Convert free-form user text into a safe FTS5 query: each whitespace token
+/// becomes a quoted phrase term (internal `"` doubled), joined implicitly as
+/// AND. Without this, FTS5's query mini-language turns innocent input into
+/// syntax errors (`don't`, `C++`, `3:30`) or column filters (`-secret`).
+pub fn sanitize_fts5_query(raw: &str) -> String {
+    raw.split_whitespace()
+        .map(|token| format!("\"{}\"", token.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub struct Fts5Backend {
     db: Database,
 }
@@ -31,16 +42,20 @@ impl Fts5Backend {
 impl SearchBackend for Fts5Backend {
     fn search(&self, query: &str, limit: usize) -> Result<Vec<Message>> {
         let conn = self.db.connection();
+        // ORDER BY bm25: without it, LIMIT truncates an arbitrary subset and
+        // the most relevant matches silently never appear.
         let mut stmt = conn.prepare(
             "SELECT messages.id, messages.message_id, messages.timestamp, messages.address, \
                 messages.body, messages.body_searchable, messages.message_type, messages.message_direction, messages.thread_id, messages.contact_name \
              FROM messages_fts \
              JOIN messages ON messages.rowid = messages_fts.rowid \
              WHERE messages_fts MATCH ?1 \
+             ORDER BY bm25(messages_fts) \
              LIMIT ?2",
         )?;
 
-        let rows = stmt.query_map(params![query, limit as i64], |row| {
+        let sanitized = sanitize_fts5_query(query);
+        let rows = stmt.query_map(params![sanitized, limit as i64], |row| {
             let message_type: i32 = row.get(6)?;
             let message_direction: i32 = row.get(7)?;
             let msg = Message {

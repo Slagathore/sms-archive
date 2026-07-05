@@ -730,6 +730,10 @@ fn run_migrations(conn: &Connection) -> Result<()> {
             include_str!("../migrations/0016_sentiment_and_jokes.sql"),
         ),
         (17, include_str!("../migrations/0017_fts_triggers.sql")),
+        (
+            18,
+            include_str!("../migrations/0018_attachments_dedupe.sql"),
+        ),
     ];
     // #todo: add a post-migration backfill that infers message_direction from legacy fields if available.
 
@@ -832,7 +836,15 @@ fn run_migrations(conn: &Connection) -> Result<()> {
             version = *target;
             continue;
         }
-        conn.execute_batch(sql)?;
+        // Run each migration atomically: several are multi-statement (chains
+        // of ALTER TABLEs) and an interruption mid-way used to leave the
+        // schema half-applied — which the single-column guards above would
+        // then mistake for "already applied" and skip forever.
+        let wrapped = format!("BEGIN IMMEDIATE;\n{}\nCOMMIT;", sql);
+        if let Err(err) = conn.execute_batch(&wrapped) {
+            let _ = conn.execute_batch("ROLLBACK");
+            return Err(err.into());
+        }
         version = *target;
     }
     Ok(())
@@ -948,6 +960,46 @@ mod tests {
             contact_name: None,
         };
         writer.insert_batch(&[msg]).unwrap();
+        let count: i64 = writer
+            .conn
+            .query_row("SELECT COUNT(*) FROM attachments", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn reingest_does_not_duplicate_attachments() {
+        // Re-importing the same backup generates fresh attachment UUIDs, so
+        // only the (message_id, file_hash) unique index (migration 0018)
+        // prevents duplicate rows.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut writer = BatchWriter::new(tmp.path(), ResourceProfile::Low, 10).unwrap();
+        let make_msg = |att_id: uuid::Uuid| Message {
+            id: uuid::Uuid::new_v4(),
+            message_id: None,
+            dedupe_hash: Some([7u8; 32]),
+            timestamp: 123,
+            address: "+1555".into(),
+            body: "pic".into(),
+            body_searchable: "pic".into(),
+            message_type: MessageType::Mms,
+            direction: MessageDirection::Incoming,
+            thread_id: None,
+            attachments: vec![sms_types::AttachmentRef {
+                id: att_id,
+                mime_type: "image/jpeg".into(),
+                file_path: "image.jpg".into(),
+                file_hash: [9u8; 32],
+                thumbnail_path: None,
+            }],
+            contact_name: None,
+        };
+        writer
+            .insert_batch(&[make_msg(uuid::Uuid::new_v4())])
+            .unwrap();
+        writer
+            .insert_batch(&[make_msg(uuid::Uuid::new_v4())])
+            .unwrap();
         let count: i64 = writer
             .conn
             .query_row("SELECT COUNT(*) FROM attachments", [], |r| r.get(0))

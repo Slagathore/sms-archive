@@ -2075,7 +2075,7 @@ fn export_messages(
                 let mut stmt = conn.prepare(&fts_sql)?;
                 let iter = stmt.query_map(
                     named_params! {
-                        ":q": q,
+                        ":q": sms_search::sanitize_fts5_query(q),
                         ":since": since,
                         ":until": until,
                         ":address": address,
@@ -2142,7 +2142,7 @@ fn export_messages(
                 let mut stmt = conn.prepare(&fts_sql)?;
                 let iter = stmt.query_map(
                     named_params! {
-                        ":q": q,
+                        ":q": sms_search::sanitize_fts5_query(q),
                         ":since": since,
                         ":until": until,
                         ":address": address,

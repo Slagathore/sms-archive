@@ -203,38 +203,78 @@ fn load_frames(
         .build()
         .map_err(|err| AppError::Media(err.to_string()))?;
 
-    let (images, map) = pool.install(|| {
-        let mut images = Vec::new();
-        let mut map = Vec::new();
-        for task in tasks {
-            wait_if_paused(pause_flag, cancel_flag)?;
-            if is_cancelled(cancel_flag) {
-                return Err(AppError::Media("Cancelled".to_string()));
-            }
-            let media_path = match resolve_media_path(task, media_root) {
-                Ok(p) => p,
-                Err(_) => continue, // skip unresolvable files
-            };
-            let (frames, temp_dir) =
-                match extract_keyframes(&media_path, &task.mime_type, max_keyframes) {
-                    Ok(result) => result,
-                    Err(_) => continue, // skip corrupt/unreadable media
-                };
-            for frame in frames {
-                if let Ok(image) = image::open(&frame.path) {
-                    images.push(image);
-                    map.push(FrameMeta {
-                        attachment_id: task.attachment_id.clone(),
-                        frame_index: frame.index as i64,
-                        frame_time_ms: frame.time_ms,
-                    });
-                }
-            }
-            sms_media::keyframes::cleanup_temp_dir(temp_dir);
-        }
-        Ok::<_, AppError>((images, map))
-    })?;
+    // Decode tasks in parallel across the pool (previously a sequential loop
+    // inside pool.install(), which used exactly one thread no matter what
+    // `workers` was set to), then flatten in task order so frame mapping
+    // stays deterministic. Failures are logged instead of silently skipped.
+    let per_task: Vec<std::result::Result<Vec<(DynamicImage, FrameMeta)>, AppError>> = pool
+        .install(|| {
+            use rayon::prelude::*;
+            tasks
+                .par_iter()
+                .map(|task| {
+                    wait_if_paused(pause_flag, cancel_flag)?;
+                    if is_cancelled(cancel_flag) {
+                        return Err(AppError::Media("Cancelled".to_string()));
+                    }
+                    let media_path = match resolve_media_path(task, media_root) {
+                        Ok(p) => p,
+                        Err(err) => {
+                            tracing::warn!(
+                                attachment_id = %task.attachment_id,
+                                %err,
+                                "media processing: skipping unresolvable file path"
+                            );
+                            return Ok(Vec::new());
+                        }
+                    };
+                    let (frames, temp_dir) =
+                        match extract_keyframes(&media_path, &task.mime_type, max_keyframes) {
+                            Ok(result) => result,
+                            Err(err) => {
+                                tracing::warn!(
+                                    path = %media_path.display(),
+                                    %err,
+                                    "media processing: keyframe extraction failed, skipping"
+                                );
+                                return Ok(Vec::new());
+                            }
+                        };
+                    let mut out = Vec::new();
+                    for frame in frames {
+                        match image::open(&frame.path) {
+                            Ok(image) => out.push((
+                                image,
+                                FrameMeta {
+                                    attachment_id: task.attachment_id.clone(),
+                                    frame_index: frame.index as i64,
+                                    frame_time_ms: frame.time_ms,
+                                },
+                            )),
+                            Err(err) => {
+                                tracing::warn!(
+                                    path = %frame.path.display(),
+                                    %err,
+                                    "media processing: frame decode failed, skipping \
+                                     (HEIC needs the sms-media `heic` feature)"
+                                );
+                            }
+                        }
+                    }
+                    sms_media::keyframes::cleanup_temp_dir(temp_dir);
+                    Ok(out)
+                })
+                .collect()
+        });
 
+    let mut images = Vec::new();
+    let mut map = Vec::new();
+    for result in per_task {
+        for (image, meta) in result? {
+            images.push(image);
+            map.push(meta);
+        }
+    }
     Ok(FrameBatch { images, map })
 }
 

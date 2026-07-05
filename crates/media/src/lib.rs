@@ -198,13 +198,21 @@ pub fn generate_video_thumbnail(
             .decoder()
             .video()
             .map_err(|e| sms_errors::AppError::Media(e.to_string()))?;
+        // Preserve the source aspect ratio (like the CLI fallback's
+        // force_original_aspect_ratio=decrease) — a fixed square target
+        // squished non-square frames.
+        let (src_w, src_h) = (decoder.width().max(1), decoder.height().max(1));
+        let ratio = (max_size as f64 / src_w as f64).min(max_size as f64 / src_h as f64);
+        let ratio = ratio.min(1.0);
+        let dst_w = ((src_w as f64 * ratio).round() as u32).max(1);
+        let dst_h = ((src_h as f64 * ratio).round() as u32).max(1);
         let mut scaler = ffmpeg::software::scaling::context::Context::get(
             decoder.format(),
             decoder.width(),
             decoder.height(),
             ffmpeg::format::Pixel::RGB24,
-            max_size,
-            max_size,
+            dst_w,
+            dst_h,
             ffmpeg::software::scaling::flag::Flags::BILINEAR,
         )
         .map_err(|e| sms_errors::AppError::Media(e.to_string()))?;

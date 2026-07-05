@@ -84,14 +84,34 @@ pub struct EmojiCount {
 fn cluster_is_emoji(cluster: &str) -> bool {
     let mut has_emoji_modifier_base = false;
     let mut has_qualifying_codepoint = false;
+    let mut regional_indicators = 0usize;
+    let mut non_regional_qualifier = false;
 
     for c in cluster.chars() {
+        // VS15 explicitly requests TEXT presentation (the inverse of VS16) —
+        // "❤︎" is deliberately not an emoji.
+        if c as u32 == 0xFE0E {
+            return false;
+        }
         if is_emoji_modifier_base(c) {
             has_emoji_modifier_base = true;
         }
+        if (0x1F1E6..=0x1F1FF).contains(&(c as u32)) {
+            regional_indicators += 1;
+            continue;
+        }
         if (c as u32) >= 0x80 && (is_emoji(c) || is_emoji_cluster_special(c)) {
             has_qualifying_codepoint = true;
+            non_regional_qualifier = true;
         }
+    }
+
+    // Regional indicators only count when paired (two form a flag); a lone,
+    // truncated indicator letter is not an emoji.
+    if regional_indicators >= 2 {
+        has_qualifying_codepoint = true;
+    } else if regional_indicators == 1 && !non_regional_qualifier && !has_emoji_modifier_base {
+        return false;
     }
 
     has_emoji_modifier_base || has_qualifying_codepoint
@@ -107,9 +127,10 @@ fn is_emoji_cluster_special(c: char) -> bool {
         0x200D                  // ZWJ — joins ZWJ sequences (👨‍👩‍👧‍👦)
         | 0x20E3                // combining enclosing keycap — the visible square in 1️⃣
         | 0xFE0F                // variation selector-16 — forces emoji presentation
-        | 0x1F1E6..=0x1F1FF     // regional indicators — pair to form flags
-        | 0x1F3FB..=0x1F3FF     // skin-tone modifiers
+        | 0x1F3FB..=0x1F3FF // skin-tone modifiers
     )
+    // Regional indicators (0x1F1E6..=0x1F1FF) are handled directly in
+    // cluster_is_emoji — they only qualify when paired into a flag.
 }
 
 #[cfg(test)]
@@ -120,6 +141,22 @@ mod tests {
     fn empty_body_yields_empty_map() {
         let counts = extract_emojis("");
         assert!(counts.is_empty());
+    }
+
+    #[test]
+    fn paired_flag_counts_but_lone_regional_indicator_does_not() {
+        let counts = extract_emojis("go \u{1F1FA}\u{1F1F8} team");
+        assert_eq!(counts.get("\u{1F1FA}\u{1F1F8}"), Some(&1));
+        // A truncated, unpaired indicator letter is not an emoji.
+        let counts = extract_emojis("broken \u{1F1FA} flag");
+        assert!(counts.is_empty());
+    }
+
+    #[test]
+    fn text_presentation_selector_is_not_an_emoji() {
+        // U+FE0E explicitly requests text rendering; U+FE0F requests emoji.
+        assert!(extract_emojis("\u{2764}\u{FE0E}").is_empty());
+        assert_eq!(extract_emojis("\u{2764}\u{FE0F}").len(), 1);
     }
 
     #[test]
@@ -216,14 +253,11 @@ mod tests {
             is_emoji_cluster_special('\u{FE0F}'),
             "VS-16 should be cluster-special"
         );
-        assert!(
-            is_emoji_cluster_special('\u{1F1E6}'),
-            "regional indicator A should be cluster-special"
-        );
-        assert!(
-            is_emoji_cluster_special('\u{1F1FF}'),
-            "regional indicator Z should be cluster-special"
-        );
+        // Regional indicators are deliberately NOT cluster-special — they
+        // are handled in cluster_is_emoji and only count when paired into a
+        // flag (a lone indicator letter is not an emoji).
+        assert!(!is_emoji_cluster_special('\u{1F1E6}'));
+        assert!(!is_emoji_cluster_special('\u{1F1FF}'));
         assert!(
             is_emoji_cluster_special('\u{1F3FB}'),
             "skin tone-1 should be cluster-special"

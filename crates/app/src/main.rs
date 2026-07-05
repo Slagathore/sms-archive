@@ -114,6 +114,10 @@ struct SmsArchiveApp {
     ollama_models_source: String,
     pending_ollama_models: Arc<Mutex<Option<Vec<OllamaModel>>>>,
     pending_ollama_log: Arc<Mutex<Vec<String>>>,
+    /// Set by the model-pull/refresh workers when they finish; log lines
+    /// alone must not clear `ollama_in_flight` (a pull streams lines for
+    /// minutes while still running).
+    ollama_job_done: Arc<AtomicBool>,
     assistant_base_url: String,
     assistant_model: String,
     assistant_model_status: String,
@@ -429,6 +433,7 @@ impl Default for SmsArchiveApp {
             ollama_models_source: String::new(),
             pending_ollama_models: Arc::new(Mutex::new(None)),
             pending_ollama_log: Arc::new(Mutex::new(Vec::new())),
+            ollama_job_done: Arc::new(AtomicBool::new(false)),
             assistant_base_url: assistant_base_url.clone(),
             assistant_model: assistant_model.clone(),
             assistant_model_status: String::new(),
@@ -1039,8 +1044,13 @@ impl eframe::App for SmsArchiveApp {
             self.contacts_in_flight = false;
         }
         if let Some(detail) = self.take_pending_contact_detail() {
-            self.contact_detail = Some(detail);
-            self.contact_status = "Contact updated".to_string();
+            // Detail loads race when contacts are clicked in quick succession
+            // (and saves share this slot) — only apply a result that still
+            // matches the current selection.
+            if self.selected_contact_id.as_deref() == Some(detail.id.as_str()) {
+                self.contact_detail = Some(detail);
+                self.contact_status = "Contact updated".to_string();
+            }
         }
         if let Some(status) = self.take_pending_contact_status() {
             self.contact_status = status;
@@ -1158,6 +1168,11 @@ impl eframe::App for SmsArchiveApp {
         let pending_lines = self.take_pending_ollama_log();
         if !pending_lines.is_empty() {
             self.append_ollama_log(pending_lines);
+        }
+        // Only worker completion clears the in-flight flag — a pull streams
+        // progress lines for minutes, and clearing on the first batch let
+        // concurrent pulls/refreshes interleave.
+        if self.ollama_job_done.swap(false, Ordering::Relaxed) {
             self.ollama_in_flight = false;
         }
         let embed_lines = self.take_pending_media_embed_status();
@@ -2179,31 +2194,28 @@ impl eframe::App for SmsArchiveApp {
                         .on_hover_text("Number of messages per page.");
                     ui.add(egui::DragValue::new(&mut self.page_size).clamp_range(10..=500));
 
-                    // Calculate pagination info
-                    let total_results = self.results.len();
-                    let total_pages = if total_results == 0 {
-                        1
-                    } else {
-                        total_results.div_ceil(self.page_size)
-                    };
-                    let current_page = if total_results == 0 {
-                        0
-                    } else {
-                        (self.page_offset / self.page_size) + 1
-                    };
+                    // `self.results` holds only the CURRENT page, so the true
+                    // total is unknown without a COUNT query. The old code
+                    // derived "total pages" from this page's row count, which
+                    // permanently disabled Next whenever a page came back
+                    // full. A full page now means "there may be more".
+                    let shown = self.results.len();
+                    let page_size = self.page_size.max(1);
+                    let current_page = (self.page_offset / page_size) + 1;
+                    let may_have_more = shown == page_size;
 
                     ui.separator();
 
                     if ui.button("◀ Prev").clicked() && self.page_offset > 0 {
-                        self.page_offset = self.page_offset.saturating_sub(self.page_size);
+                        self.page_offset = self.page_offset.saturating_sub(page_size);
                         self.run_search();
-                        self.page_jump_input = (self.page_offset / self.page_size + 1).to_string();
+                        self.page_jump_input = (self.page_offset / page_size + 1).to_string();
                     }
 
-                    ui.label(format!("Page {} of {} ({} total)", current_page, total_pages, total_results));
+                    ui.label(format!("Page {} ({} shown)", current_page, shown));
 
                     // Jump to page
-                    if self.page_jump_input.is_empty() && current_page > 0 {
+                    if self.page_jump_input.is_empty() {
                         self.page_jump_input = current_page.to_string();
                     }
                     ui.label("Jump:");
@@ -2213,18 +2225,18 @@ impl eframe::App for SmsArchiveApp {
                     );
                     if page_input.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         if let Ok(page) = self.page_jump_input.trim().parse::<usize>() {
-                            if page > 0 && page <= total_pages {
-                                self.page_offset = (page - 1) * self.page_size;
+                            if page > 0 {
+                                self.page_offset = (page - 1) * page_size;
                                 self.run_search();
                                 self.page_jump_input = page.to_string();
                             }
                         }
                     }
 
-                    if ui.button("Next ▶").clicked() && current_page < total_pages {
-                        self.page_offset = self.page_offset.saturating_add(self.page_size);
+                    if ui.button("Next ▶").clicked() && may_have_more {
+                        self.page_offset = self.page_offset.saturating_add(page_size);
                         self.run_search();
-                        self.page_jump_input = (self.page_offset / self.page_size + 1).to_string();
+                        self.page_jump_input = (self.page_offset / page_size + 1).to_string();
                     }
 
                     if self.search_in_flight {
@@ -3281,8 +3293,17 @@ impl eframe::App for SmsArchiveApp {
                                 self.load_media_page();
                             }
                             if ui.button("Next").clicked() {
-                                self.media_page_offset = (self.media_page_offset + self.media_page_size)
-                                    .min(self.media_total_count.saturating_sub(1));
+                                // Clamp to the last page-aligned offset, not the
+                                // last row index, so the final page isn't a
+                                // single-item stub.
+                                let page = self.media_page_size.max(1);
+                                let last_page_offset = self
+                                    .media_total_count
+                                    .saturating_sub(1)
+                                    .div_euclid(page)
+                                    * page;
+                                self.media_page_offset =
+                                    (self.media_page_offset + page).min(last_page_offset);
                                 self.load_media_page();
                             }
                             if ui.button("Load All").clicked() {
@@ -7668,6 +7689,8 @@ impl SmsArchiveApp {
         let base_url = base_url.to_string();
         let pending = Arc::clone(&self.pending_ollama_models);
         let pending_log = Arc::clone(&self.pending_ollama_log);
+        self.ollama_job_done.store(false, Ordering::Relaxed);
+        let job_done = Arc::clone(&self.ollama_job_done);
         std::thread::spawn(move || {
             let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
             let resp = ureq::get(&url).call();
@@ -7696,6 +7719,7 @@ impl SmsArchiveApp {
                     }
                 }
             }
+            job_done.store(true, Ordering::Relaxed);
         });
     }
 
@@ -7754,6 +7778,8 @@ impl SmsArchiveApp {
         self.ollama_status = "Pulling model...".to_string();
         let base_url = self.ollama_base_url.trim().to_string();
         let pending_log = Arc::clone(&self.pending_ollama_log);
+        self.ollama_job_done.store(false, Ordering::Relaxed);
+        let job_done = Arc::clone(&self.ollama_job_done);
         std::thread::spawn(move || {
             let url = format!("{}/api/pull", base_url.trim_end_matches('/'));
             let resp = ureq::post(&url).send_json(serde_json::json!({ "name": name }));
@@ -7807,6 +7833,7 @@ impl SmsArchiveApp {
                     }
                 }
             }
+            job_done.store(true, Ordering::Relaxed);
         });
     }
 
@@ -8329,7 +8356,7 @@ impl SmsArchiveApp {
                         aggregated.attachments_written += stats.attachments_written;
                         aggregated.parse_errors += stats.parse_errors;
                         aggregated.bytes_read += stats.bytes_read;
-                        aggregated.messages_inserted = stats.messages_inserted;
+                        aggregated.messages_inserted += stats.messages_inserted;
                     }
                     Err(sms_errors::AppError::SkippedFile) => {
                         continue;
@@ -8964,7 +8991,7 @@ fn run_paged_fts_filtered(
          WHERE messages_fts MATCH ?",
     );
     let mut params: Vec<rusqlite::types::Value> = Vec::new();
-    params.push(query.to_string().into());
+    params.push(sms_search::sanitize_fts5_query(query).into());
 
     if !filters.address.trim().is_empty() {
         sql.push_str(" AND messages.address = ?");
@@ -8987,15 +9014,23 @@ fn run_paged_fts_filtered(
         params.push(until.into());
     }
 
-    // Apply max_results limit if specified, otherwise use pagination limit
-    if let Some(max) = max_results {
-        sql.push_str(" LIMIT ?");
-        params.push((max as i64).into());
-    } else {
-        sql.push_str(" LIMIT ? OFFSET ?");
-        params.push((limit as i64).into());
-        params.push((offset as i64).into());
+    // Rank before truncating — without ORDER BY, LIMIT keeps an arbitrary
+    // subset and the best matches may never be shown.
+    sql.push_str(" ORDER BY bm25(messages_fts)");
+
+    // Page within the optional overall cap. Previously a set cap emitted
+    // `LIMIT max` with no OFFSET at all, so Next/Prev re-fetched the same
+    // rows on every page.
+    let effective_limit = match max_results {
+        Some(max) => limit.min(max.saturating_sub(offset)),
+        None => limit,
+    };
+    if effective_limit == 0 {
+        return Ok(Vec::new());
     }
+    sql.push_str(" LIMIT ? OFFSET ?");
+    params.push((effective_limit as i64).into());
+    params.push((offset as i64).into());
 
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
@@ -10133,15 +10168,21 @@ fn normalize_phone_like(value: &str) -> String {
     if trimmed.is_empty() {
         return String::new();
     }
-    let mut out = String::new();
     let mut digits = trimmed
         .chars()
         .filter(|c| c.is_ascii_digit())
         .collect::<String>();
+    let had_plus = trimmed.starts_with('+');
+    let mut folded_nanp = false;
     if digits.len() == 11 && digits.starts_with('1') {
         digits = digits[1..].to_string();
+        folded_nanp = true;
     }
-    if trimmed.starts_with('+') {
+    let mut out = String::new();
+    // Keep '+' only when no NANP prefix was folded — otherwise
+    // "+15551234567" and "15551234567" normalize to different keys and the
+    // same person imports as two separate contacts.
+    if had_plus && !folded_nanp {
         out.push('+');
     }
     out.push_str(&digits);
@@ -10520,7 +10561,10 @@ fn format_vcard_address(value: &str) -> String {
 fn build_csv_header_map(headers: &csv::StringRecord) -> HashMap<String, usize> {
     let mut map = HashMap::new();
     for (idx, name) in headers.iter().enumerate() {
-        map.insert(normalize_header_name(name), idx);
+        // First column wins when normalized names collide (e.g. "Phone 1" vs
+        // "phone1", or duplicate headers) — the primary column usually comes
+        // first, and silently letting a later duplicate shadow it drops data.
+        map.entry(normalize_header_name(name)).or_insert(idx);
     }
     map
 }

@@ -65,6 +65,13 @@ pub struct ResponseConfig {
     /// Gap above which a response is overnight if prev message was sent during
     /// the overnight window. Default 4 hours.
     pub overnight_evening_gap_ms: i64,
+    /// Largest gap that still counts as a response pair. Deliberately larger
+    /// than the segmenter's conversation timeout: a reply the next morning
+    /// opens a new conversation *and* is a (typically overnight) response.
+    /// If pairs were capped at the conversation timeout, no gap could ever
+    /// reach `overnight_force_gap_ms` and the overnight metrics would always
+    /// be empty. Default 24 hours.
+    pub max_response_gap_ms: i64,
 }
 
 impl Default for ResponseConfig {
@@ -75,6 +82,7 @@ impl Default for ResponseConfig {
             overnight_end_hour: 7,
             overnight_force_gap_ms: 8 * 60 * 60 * 1000, // 8 hours
             overnight_evening_gap_ms: 4 * 60 * 60 * 1000, // 4 hours
+            max_response_gap_ms: 24 * 60 * 60 * 1000,   // 24 hours
         }
     }
 }
@@ -181,31 +189,39 @@ pub fn compute_response_metrics(
     let mut prev: Option<ResponseMessage> = None;
 
     for msg in messages.iter().copied() {
-        let new_convo = match prev {
-            Some(p) => msg.timestamp_ms - p.timestamp_ms > seg_config.conversation_timeout_ms,
-            None => true,
-        };
-
-        if new_convo {
+        let Some(p) = prev else {
             convo_started_by = Some(msg.sender);
             me_first_response_seen_in_convo = false;
             them_first_response_seen_in_convo = false;
             prev = Some(msg);
             continue;
+        };
+
+        let gap_ms = msg.timestamp_ms - p.timestamp_ms;
+        let new_convo = gap_ms > seg_config.conversation_timeout_ms;
+        if new_convo {
+            convo_started_by = Some(msg.sender);
+            me_first_response_seen_in_convo = false;
+            them_first_response_seen_in_convo = false;
         }
 
-        // Safe: new_convo handles the prev=None case via early continue above.
-        let p = prev.expect("non-first iteration must have prev set");
-
         if msg.sender == p.sender {
-            // Double message — same sender twice in a row. NOT a response.
-            match msg.sender {
-                Participant::Me => me_doubles += 1,
-                Participant::Them => them_doubles += 1,
+            if !new_convo {
+                // Double message — same sender twice in a row within one
+                // conversation. NOT a response.
+                match msg.sender {
+                    Participant::Me => me_doubles += 1,
+                    Participant::Them => them_doubles += 1,
+                }
             }
-        } else {
-            // Sender flipped. This is a response pair.
-            let response_ms = msg.timestamp_ms - p.timestamp_ms;
+        } else if gap_ms <= config.max_response_gap_ms {
+            // Sender flipped within the response window. Counts as a
+            // response pair even across a conversation boundary — replying
+            // the next morning after nine hours asleep is exactly what the
+            // awake/overnight split measures. (Pairs used to be capped by
+            // the 4h conversation timeout, which made the 8h overnight
+            // threshold unreachable — overnight medians were always empty.)
+            let response_ms = gap_ms;
             let bucket = histogram_bucket(response_ms);
             let is_rapid = response_ms <= config.rapid_response_threshold_ms;
             let is_overnight = is_overnight_response(p.timestamp_ms, response_ms, &tz, config);
@@ -414,6 +430,23 @@ mod tests {
 
     fn seg() -> SegmentationConfig {
         SegmentationConfig::default()
+    }
+
+    #[test]
+    fn overnight_response_counted_under_default_config() {
+        // A 9h reply gap opens a new conversation per the segmenter (4h
+        // timeout) but is still a response pair — and an overnight one —
+        // under the default 24h response window. Before the fix, no gap
+        // could exceed the 4h timeout, so overnight medians were always
+        // empty with default settings.
+        let nine_hours = 9 * 60 * 60 * 1000;
+        let messages = vec![r(0, Participant::Them), r(nine_hours, Participant::Me)];
+        let out = compute_response_metrics(&messages, &cfg(), &seg(), 0);
+        assert_eq!(out.my_median_response_overnight_ms, Some(nine_hours));
+        assert_eq!(out.my_median_response_ms, Some(nine_hours));
+        // It opened the new conversation itself, so it is not a "first
+        // response" to anything.
+        assert_eq!(out.my_median_first_response_ms, None);
     }
 
     // ---------- bucket helper ----------

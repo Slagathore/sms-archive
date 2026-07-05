@@ -71,7 +71,10 @@ fn normalize_phone_like(value: &str) -> String {
     }
     let mut digits: String = trimmed.chars().filter(|c| c.is_ascii_digit()).collect();
     if digits.len() == 11 && digits.starts_with('1') {
+        // NANP prefix folded — drop any '+' too so the key matches SMS-style
+        // bare 10-digit addresses.
         digits = digits[1..].to_string();
+        return digits;
     }
     if trimmed.starts_with('+') {
         format!("+{}", digits)

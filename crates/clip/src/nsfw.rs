@@ -233,6 +233,32 @@ impl NsfwProbe {
     }
 }
 
+/// Reject weight matrices that are not a final 1- or 2-row classifier head.
+/// `score()` computes `sigmoid(logits[0] - logits[1])`; feeding it a hidden
+/// layer (e.g. the 64x768 `ml/nsfw_probe.npz` export) would silently produce
+/// meaningless scores.
+fn validate_probe(weights: Array2<f32>, bias: Array1<f32>, path: &Path) -> Result<NsfwProbe> {
+    let rows = weights.shape()[0];
+    if rows != 1 && rows != 2 {
+        return Err(AppError::Media(format!(
+            "NSFW probe at {} has {} output rows; expected a final classifier head with 1 \
+             (nsfw logit) or 2 (nsfw/safe logits) rows — hidden-layer exports produce \
+             meaningless scores",
+            path.display(),
+            rows
+        )));
+    }
+    if bias.len() != rows {
+        return Err(AppError::Media(format!(
+            "NSFW probe at {}: bias length {} does not match weight rows {}",
+            path.display(),
+            bias.len(),
+            rows
+        )));
+    }
+    Ok(NsfwProbe { weights, bias })
+}
+
 fn load_safetensors(path: &Path) -> Result<NsfwProbe> {
     let mut data = Vec::new();
     File::open(path)?.read_to_end(&mut data)?;
@@ -242,10 +268,7 @@ fn load_safetensors(path: &Path) -> Result<NsfwProbe> {
     let bias = find_tensor(&tensors, &["bias", "linear.bias", "classifier.bias"])?;
     let weight = tensor_to_array2(weight)?;
     let bias = tensor_to_array1(bias)?;
-    Ok(NsfwProbe {
-        weights: weight,
-        bias,
-    })
+    validate_probe(weight, bias, path)
 }
 
 fn load_npz(path: &Path) -> Result<NsfwProbe> {
@@ -261,10 +284,7 @@ fn load_npz(path: &Path) -> Result<NsfwProbe> {
         .or_else(|_| npz.by_name("linear.bias.npy"))
         .or_else(|_| npz.by_name("classifier.bias.npy"))
         .map_err(|e| AppError::Media(format!("NPZ bias error: {}", e)))?;
-    Ok(NsfwProbe {
-        weights: weight,
-        bias,
-    })
+    validate_probe(weight, bias, path)
 }
 
 fn find_tensor<'a>(tensors: &'a SafeTensors, keys: &[&str]) -> Result<TensorView<'a>> {

@@ -36,8 +36,13 @@ pub fn clip_preprocess_batch(
         let rgb = image.to_rgb8();
         let (width, height) = rgb.dimensions();
         let scale = (size as f32 / width as f32).max(size as f32 / height as f32);
-        let new_w = (width as f32 * scale).round().max(1.0) as u32;
-        let new_h = (height as f32 * scale).round().max(1.0) as u32;
+        // Cap the scaled long edge: only a size×size center crop survives,
+        // so Lanczos-resampling a huge strip for a >16:1-aspect image wastes
+        // unbounded memory. Beyond the cap we accept distortion — such
+        // degenerate inputs produce garbage CLIP embeddings either way.
+        let max_edge = size * 16;
+        let new_w = ((width as f32 * scale).round().max(1.0) as u32).min(max_edge);
+        let new_h = ((height as f32 * scale).round().max(1.0) as u32).min(max_edge);
         let resized =
             image::imageops::resize(&rgb, new_w, new_h, image::imageops::FilterType::Lanczos3);
 

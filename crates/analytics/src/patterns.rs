@@ -22,8 +22,12 @@ use std::sync::LazyLock;
 // we don't anchor with \b.
 // =========================================================================
 static LAUGH_RE: LazyLock<Regex> = LazyLock::new(|| {
+    // Repetition forms tolerate odd lengths and casual suffixes: "hahah",
+    // "heheh", "lolol", "loll", "lolz", "lmaooo" are all real-world laughs
+    // that the strict even-repeat forms (`ha(?:ha)+` etc.) rejected because
+    // the stray trailing letter broke the `\b`.
     Regex::new(
-        r"(?i)\b(l(?:o)+l|lmao|lmfao|rofl|ha(?:ha)+|he(?:he)+)\b|[\u{1F602}\u{1F923}\u{1F480}]",
+        r"(?i)\b(l(?:o+l)+l*z*|lmf?ao+|rofl|ha(?:ha)+h?|he(?:he)+h?)\b|[\u{1F602}\u{1F923}\u{1F480}]",
     )
     .unwrap()
 });
@@ -109,6 +113,17 @@ mod tests {
         assert!(is_laugh("😂"));
         assert!(is_laugh("dying 🤣"));
         assert!(is_laugh("💀💀💀"));
+    }
+
+    #[test]
+    fn laughs_matches_odd_length_and_suffixed_forms() {
+        assert!(is_laugh("hahah"));
+        assert!(is_laugh("hahahah"));
+        assert!(is_laugh("heheh"));
+        assert!(is_laugh("lolol"));
+        assert!(is_laugh("loll"));
+        assert!(is_laugh("lolz"));
+        assert!(is_laugh("lmaooo"));
     }
 
     #[test]
