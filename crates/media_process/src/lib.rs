@@ -242,7 +242,9 @@ fn load_frames(
                         };
                     let mut out = Vec::new();
                     for frame in frames {
-                        match image::open(&frame.path) {
+                        // open_image falls back to a system-ffmpeg decode, so
+                        // HEIC/HEIF frames reach CLIP/NSFW like everything else.
+                        match sms_media::open_image(&frame.path) {
                             Ok(image) => out.push((
                                 image,
                                 FrameMeta {
@@ -255,8 +257,7 @@ fn load_frames(
                                 tracing::warn!(
                                     path = %frame.path.display(),
                                     %err,
-                                    "media processing: frame decode failed, skipping \
-                                     (HEIC needs the sms-media `heic` feature)"
+                                    "media processing: frame decode failed, skipping"
                                 );
                             }
                         }

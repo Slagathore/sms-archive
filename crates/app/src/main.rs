@@ -5437,7 +5437,10 @@ impl SmsArchiveApp {
             "ml/clip-vit-l-14.onnx",
             "ml/clip-vit-l-14-336.onnx",
         ];
-        let nsfw_candidates = ["ml/nsfw_classifier.onnx", "ml/nsfw_probe.npz"];
+        // Prefer the Marqo image classifier (scripts/setup_marqo_nsfw.py),
+        // fall back to the LAION embedding head. The old ml/nsfw_probe.npz
+        // was a hidden-layer dump, not a classifier, and was removed.
+        let nsfw_candidates = ["ml/nsfw_marqo_384.onnx", "ml/nsfw_classifier.onnx"];
 
         let mut changed = false;
         if self.clip_model_path.trim().is_empty()
@@ -8942,8 +8945,9 @@ impl SmsArchiveApp {
             return Some(preview_path);
         }
         if let Err(_err) = generate_thumbnail_for_mime(file_path, &preview_path, 256, mime_type) {
-            // Silently skip — unsupported formats (HEIC, video without ffmpeg) just
-            // won't get a preview thumbnail.  No need to spam the status bar.
+            // Silently skip — HEIC and video decode via the system ffmpeg, so
+            // this is only truly unsupported/corrupt media now. No need to
+            // spam the status bar.
             return None;
         }
         if let Ok(metadata) = fs::metadata(&preview_path) {

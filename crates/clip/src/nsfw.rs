@@ -1,10 +1,15 @@
-//! Mission statement: Provide NSFW classification on CLIP embeddings, supporting both
-//! simple linear probes (.npz/.safetensors) and full ONNX MLP models.
+//! Mission statement: Provide NSFW classification, supporting CLIP-embedding
+//! heads (ONNX MLPs like the LAION detector, plus simple linear probes from
+//! .npz/.safetensors) and direct image-input ONNX classifiers (e.g. the
+//! Marqo ViT export from `scripts/setup_marqo_nsfw.py`). The input kind is
+//! auto-detected from the model's input rank.
 
+use crate::preprocessing::{clip_preprocess_batch, ClipPreprocessConfig};
+use image::DynamicImage;
 use ndarray::{Array1, Array2};
 use ndarray_npy::NpzReader;
 use ort::session::Session;
-use ort::value::Tensor;
+use ort::value::{Tensor, ValueType};
 use safetensors::tensor::TensorView;
 use safetensors::SafeTensors;
 use sms_errors::{AppError, Result};
@@ -74,13 +79,43 @@ impl NsfwClassifier {
             NsfwClassifier::Probe(probe) => embeddings.iter().map(|e| probe.score(e)).collect(),
         }
     }
+
+    /// Square input size when the loaded model consumes raw images rather
+    /// than CLIP embeddings (e.g. the Marqo ViT export).
+    pub fn wants_images(&self) -> Option<u32> {
+        match self {
+            NsfwClassifier::Onnx(classifier) => classifier.wants_images(),
+            NsfwClassifier::Probe(_) => None,
+        }
+    }
+
+    /// Score raw images (only valid when [`Self::wants_images`] is Some).
+    pub fn score_batch_images(&mut self, images: &[DynamicImage]) -> Result<Vec<NsfwScore>> {
+        match self {
+            NsfwClassifier::Onnx(classifier) => classifier.score_batch_images(images),
+            NsfwClassifier::Probe(_) => Err(AppError::Media(
+                "NSFW probes score embeddings, not images".to_string(),
+            )),
+        }
+    }
 }
 
-/// ONNX-based NSFW classifier (full MLP)
+/// What the classifier's ONNX graph consumes, detected from its input rank.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnnxInputKind {
+    /// `[batch, dims]` — a head over CLIP embeddings (LAION detector).
+    Embedding,
+    /// `[batch, 3, size, size]` — a full image classifier with normalization
+    /// baked into the graph; expects RGB pixels scaled to [0, 1].
+    Image { size: u32 },
+}
+
+/// ONNX-based NSFW classifier (embedding head or image model)
 pub struct OnnxClassifier {
     session: Session,
     input_name: String,
     output_name: String,
+    input_kind: OnnxInputKind,
 }
 
 impl std::fmt::Debug for OnnxClassifier {
@@ -88,6 +123,7 @@ impl std::fmt::Debug for OnnxClassifier {
         f.debug_struct("OnnxClassifier")
             .field("input_name", &self.input_name)
             .field("output_name", &self.output_name)
+            .field("input_kind", &self.input_kind)
             .finish()
     }
 }
@@ -110,9 +146,7 @@ impl OnnxClassifier {
             }
         }
 
-        let session = builder
-            .commit_from_file(path)
-            .map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
+        let session = crate::encoder::commit_session(builder, path)?;
 
         let input_name = session
             .inputs()
@@ -126,11 +160,78 @@ impl OnnxClassifier {
             .map(|o| o.name().to_string())
             .ok_or_else(|| AppError::Media("NSFW model has no outputs".to_string()))?;
 
+        let input_kind = match session.inputs().first().map(|i| i.dtype()) {
+            Some(ValueType::Tensor { shape, .. }) if shape.len() == 4 => {
+                // NCHW image input; dynamic dims come through as -1.
+                let size = shape[2].max(shape[3]);
+                if size <= 0 {
+                    return Err(AppError::Media(
+                        "image-input NSFW model has dynamic spatial dims; expected a fixed size"
+                            .to_string(),
+                    ));
+                }
+                OnnxInputKind::Image { size: size as u32 }
+            }
+            _ => OnnxInputKind::Embedding,
+        };
+
         Ok(Self {
             session,
             input_name,
             output_name,
+            input_kind,
         })
+    }
+
+    /// Square input size when this model consumes raw images rather than
+    /// CLIP embeddings.
+    pub fn wants_images(&self) -> Option<u32> {
+        match self.input_kind {
+            OnnxInputKind::Image { size } => Some(size),
+            OnnxInputKind::Embedding => None,
+        }
+    }
+
+    /// Score raw images through an image-input model. Preprocessing is
+    /// resize-shortest-side + center-crop + scale to [0, 1]; normalization
+    /// is baked into the exported graph.
+    pub fn score_batch_images(&mut self, images: &[DynamicImage]) -> Result<Vec<NsfwScore>> {
+        let OnnxInputKind::Image { size } = self.input_kind else {
+            return Err(AppError::Media(
+                "this NSFW model scores embeddings, not images".to_string(),
+            ));
+        };
+        if images.is_empty() {
+            return Ok(vec![]);
+        }
+        let config = ClipPreprocessConfig {
+            target_size: size,
+            mean: [0.0; 3],
+            std: [1.0; 3],
+        };
+        let tensor = clip_preprocess_batch(images, &config)?;
+        let input = Tensor::<f32>::from_array(tensor)
+            .map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
+        let outputs = self
+            .session
+            .run(ort::inputs! { self.input_name.as_str() => input })
+            .map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
+        let output = outputs
+            .iter()
+            .find(|(name, _)| *name == self.output_name.as_str())
+            .map(|(_, value)| value)
+            .or_else(|| outputs.iter().next().map(|(_, value)| value))
+            .ok_or_else(|| AppError::Media("NSFW output missing".to_string()))?;
+        let array = output
+            .try_extract_array::<f32>()
+            .map_err(|e: ort::Error| AppError::Media(e.to_string()))?;
+        Ok(array
+            .iter()
+            .map(|&score| NsfwScore {
+                label: label_from_score(score),
+                score,
+            })
+            .collect())
     }
 
     #[allow(dead_code)]
@@ -143,6 +244,11 @@ impl OnnxClassifier {
     }
 
     pub fn score_batch(&mut self, embeddings: &[Vec<f32>]) -> Result<Vec<NsfwScore>> {
+        if let OnnxInputKind::Image { .. } = self.input_kind {
+            return Err(AppError::Media(
+                "this NSFW model scores images; use score_batch_images".to_string(),
+            ));
+        }
         if embeddings.is_empty() {
             return Ok(vec![]);
         }

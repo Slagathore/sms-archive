@@ -1,6 +1,6 @@
 {
   "clip_model_path": "./ml/CLIP1/vision_model_fp16.onnx",
-  "clip_nsfw_weights_path": "./ml/nsfw_classifier.onnx",
+  "clip_nsfw_weights_path": "./ml/nsfw_marqo_384.onnx",
   "clip_text_model_path": "./ml/CLIP1/text_model_fp16.onnx",
   "clip_text_tokenizer_path": "./ml/CLIP1/tokenizer.json",
   "media_embed_prompt": "Summarize this image in one short sentence. Use tags to further contextualize the media for efficient semantic searching. if its nsfw, tag how, and whats shown.",

@@ -16,6 +16,9 @@ serde_json = { workspace = true }
 
 sms-errors = { path = "../errors" }
 
+[dev-dependencies]
+image = { workspace = true }
+
 [features]
 default = ["onnx"]
 onnx = []

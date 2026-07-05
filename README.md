@@ -23,8 +23,8 @@ High-performance Rust desktop application for ingesting, indexing, searching, an
 | [Rust](https://rustup.rs/)                                     | stable (see `rust-toolchain.toml`) | Install via rustup                            |
 | [Python](https://www.python.org/)                              | 3.10+                              | Only needed to generate ML models             |
 | [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) | 5.x                                | Optional; enables OCR on images               |
-| [FFmpeg](https://ffmpeg.org/download.html)                     | 6.x / 7.x                          | Required for video keyframe extraction        |
-| [libheif](https://github.com/strukturag/libheif)               | 1.x                                | Required for HEIC/HEIF image support          |
+| [FFmpeg](https://ffmpeg.org/download.html)                     | 7.x / 8.x                          | Video keyframes + HEIC/HEIF image decoding    |
+| [libheif](https://github.com/strukturag/libheif)               | 1.x                                | Optional; native HEIC via the `heic` feature (ffmpeg fallback covers HEIC without it) |
 | CUDA Toolkit                                                   | 11.x / 12.x                        | Optional; enables GPU inference for CLIP/NSFW |
 
 > **Windows note:** Add `tesseract.exe`, `ffmpeg.exe`, and `libheif` DLLs to your `PATH`, or set the
@@ -53,6 +53,20 @@ python scripts/setup_ml_models.py
 This exports the CLIP ViT-L/14 visual encoder and the NSFW classifier MLP to `ml/`. It only needs to run once; subsequent runs are skipped if the files already exist.
 
 > For GPU inference install `onnxruntime-gpu` instead of `onnxruntime` and ensure CUDA is available.
+
+#### Optional: higher-accuracy NSFW classifier
+
+The default NSFW model is a small head over CLIP embeddings
+(`ml/nsfw_classifier.onnx`, from LAION's CLIP-based detector). For better
+accuracy, export the Marqo image-input classifier (~21 MB, scores frames
+directly instead of embeddings):
+
+```powershell
+python scripts/setup_marqo_nsfw.py
+```
+
+This produces `ml/nsfw_marqo_384.onnx`; the app auto-detects the model kind
+from its input shape, and autofill prefers the Marqo model when both exist.
 
 ### 3. Configure paths
 

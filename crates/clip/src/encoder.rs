@@ -4,12 +4,55 @@
 use crate::nsfw::NsfwClassifier;
 use crate::preprocessing::{clip_preprocess_batch, ClipPreprocessConfig};
 use image::DynamicImage;
+use ort::session::builder::{GraphOptimizationLevel, SessionBuilder};
 use ort::session::Session;
 use ort::value::Tensor;
 use sms_errors::{AppError, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+
+/// Create a session, retrying with reduced graph optimization when full
+/// optimization fails to initialize. Newer ONNX Runtime releases ship a
+/// SimplifiedLayerNormFusion bug that breaks fp16 CLIP exports (the CLIP1
+/// bundle) at the default optimization level; the same model loads fine
+/// with basic or disabled optimizations. (The ml crate applies the same
+/// fallback for the fp16 text encoder.)
+pub(crate) fn commit_session(builder: SessionBuilder, path: &Path) -> Result<Session> {
+    match builder.clone().commit_from_file(path) {
+        Ok(session) => Ok(session),
+        Err(err) => {
+            tracing::warn!(
+                model = %path.display(),
+                %err,
+                "session init failed at full optimization; retrying at Level1"
+            );
+            let level1 = builder
+                .clone()
+                .with_optimization_level(GraphOptimizationLevel::Level1)
+                .map_err(|e| AppError::Media(e.to_string()))
+                .and_then(|mut b| {
+                    b.commit_from_file(path)
+                        .map_err(|e| AppError::Media(e.to_string()))
+                });
+            match level1 {
+                Ok(session) => Ok(session),
+                Err(err) => {
+                    tracing::warn!(
+                        model = %path.display(),
+                        %err,
+                        "session init failed at Level1; retrying with optimizations disabled"
+                    );
+                    builder
+                        .with_optimization_level(GraphOptimizationLevel::Disable)
+                        .map_err(|e| AppError::Media(e.to_string()))?
+                        .commit_from_file(path)
+                        .map_err(|e| AppError::Media(e.to_string()))
+                }
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ClipResult {
@@ -123,9 +166,7 @@ impl ClipEncoder {
             }
         }
 
-        let session = builder
-            .commit_from_file(clip_model)
-            .map_err(|e| AppError::Media(e.to_string()))?;
+        let session = commit_session(builder, clip_model)?;
 
         let input_name = session
             .inputs()
@@ -199,8 +240,13 @@ impl ClipEncoder {
             .map(|row: ndarray::ArrayView1<'_, f32>| l2_normalize(row.to_vec()))
             .collect();
 
-        // Run NSFW classifier on all embeddings (batch)
-        let nsfw_scores = self.classifier.score_batch(&embeddings)?;
+        // Run the NSFW classifier: image-input models (Marqo ViT) score the
+        // raw frames directly; embedding heads (LAION) score the CLIP vectors.
+        let nsfw_scores = if self.classifier.wants_images().is_some() {
+            self.classifier.score_batch_images(images)?
+        } else {
+            self.classifier.score_batch(&embeddings)?
+        };
 
         // Combine results
         let results: Vec<ClipResult> = embeddings

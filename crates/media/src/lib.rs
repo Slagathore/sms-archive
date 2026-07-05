@@ -17,12 +17,57 @@ pub fn generate_thumbnail(
     dest: &std::path::Path,
     max_size: u32,
 ) -> Result<()> {
-    let img = image::open(source).map_err(|e| sms_errors::AppError::Media(e.to_string()))?;
+    let img = open_image(source)?;
     let thumb = img.thumbnail(max_size, max_size);
     thumb
         .save(dest)
         .map_err(|e| sms_errors::AppError::Media(e.to_string()))?;
     Ok(())
+}
+
+/// Open an image with the `image` crate, falling back to a system-ffmpeg
+/// decode for formats it can't read natively — most importantly iPhone
+/// HEIC/HEIF. The fallback also rescues attachments whose MIME type lies
+/// about the actual container.
+pub fn open_image(source: &Path) -> Result<image::DynamicImage> {
+    match image::open(source) {
+        Ok(img) => Ok(img),
+        Err(primary) => decode_image_via_ffmpeg(source).map_err(|fallback| {
+            sms_errors::AppError::Media(format!(
+                "image decode failed ({primary}); ffmpeg fallback failed ({fallback})"
+            ))
+        }),
+    }
+}
+
+/// Decode a single image frame by shelling out to the system `ffmpeg`
+/// binary (PNG intermediate), the same external dependency the video
+/// thumbnail/keyframe paths already rely on. ffmpeg ≥ 7 reads HEIC/HEIF,
+/// including the first frame of HEIC sequences.
+pub fn decode_image_via_ffmpeg(source: &Path) -> Result<image::DynamicImage> {
+    let temp = tempfile::tempdir()?;
+    let out = temp.path().join("frame.png");
+    let output = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            source.to_string_lossy().as_ref(),
+            "-frames:v",
+            "1",
+            out.to_string_lossy().as_ref(),
+        ])
+        .output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(sms_errors::AppError::Media(format!(
+            "ffmpeg image decode failed: {}",
+            stderr.trim()
+        )));
+    }
+    image::open(&out).map_err(|e| sms_errors::AppError::Media(e.to_string()))
 }
 
 pub fn hash_file(path: &std::path::Path) -> Result<[u8; 32]> {
@@ -167,13 +212,20 @@ pub fn generate_thumbnail_heic(
 
 #[cfg(not(feature = "heic"))]
 pub fn generate_thumbnail_heic(
-    _source: &std::path::Path,
-    _dest: &std::path::Path,
-    _max_size: u32,
+    source: &std::path::Path,
+    dest: &std::path::Path,
+    max_size: u32,
 ) -> Result<()> {
-    Err(sms_errors::AppError::Media(
-        "HEIC support not enabled".into(),
-    ))
+    // Without libheif compiled in, decode via the system ffmpeg — the same
+    // external binary the video paths already require. Previously this stub
+    // hard-errored, so every iPhone HEIC photo silently lacked thumbnails,
+    // CLIP embeddings, and NSFW scores.
+    let img = decode_image_via_ffmpeg(source)?;
+    let thumb = img.thumbnail(max_size, max_size);
+    thumb
+        .save(dest)
+        .map_err(|e| sms_errors::AppError::Media(e.to_string()))?;
+    Ok(())
 }
 
 #[cfg(feature = "ffmpeg")]

@@ -9,11 +9,20 @@ use sms_errors::{AppError, Result};
 #[derive(Debug, Clone)]
 pub struct ClipPreprocessConfig {
     pub target_size: u32,
+    /// Per-channel normalization applied after scaling pixels to [0, 1].
+    /// Defaults to CLIP's constants; image-input NSFW models bake their
+    /// normalization into the graph and pass 0/1 to get raw [0, 1] pixels.
+    pub mean: [f32; 3],
+    pub std: [f32; 3],
 }
 
 impl Default for ClipPreprocessConfig {
     fn default() -> Self {
-        Self { target_size: 336 }
+        Self {
+            target_size: 336,
+            mean: CLIP_MEAN,
+            std: CLIP_STD,
+        }
     }
 }
 
@@ -56,9 +65,9 @@ pub fn clip_preprocess_batch(
                 let r = r as f32 / 255.0;
                 let g = g as f32 / 255.0;
                 let b = b as f32 / 255.0;
-                tensor[[index, 0, y, x]] = (r - CLIP_MEAN[0]) / CLIP_STD[0];
-                tensor[[index, 1, y, x]] = (g - CLIP_MEAN[1]) / CLIP_STD[1];
-                tensor[[index, 2, y, x]] = (b - CLIP_MEAN[2]) / CLIP_STD[2];
+                tensor[[index, 0, y, x]] = (r - config.mean[0]) / config.std[0];
+                tensor[[index, 1, y, x]] = (g - config.mean[1]) / config.std[1];
+                tensor[[index, 2, y, x]] = (b - config.mean[2]) / config.std[2];
             }
         }
     }
