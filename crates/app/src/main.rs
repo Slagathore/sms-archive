@@ -13,7 +13,6 @@ use sms_config::{
 };
 use sms_db::Database;
 use sms_ingest::{ingest_file, IngestOptions, IngestProgress};
-use sms_media::generate_thumbnail_for_mime;
 use sms_media::keyframes::{cleanup_temp_dir, extract_keyframes, Keyframe};
 use sms_media_process::{process_media, MediaProcessOptions};
 use sms_ml::{DevicePreference, EmbeddingConfig, EmbeddingService};
@@ -33,6 +32,15 @@ use std::time::{Duration, Instant, SystemTime};
 use walkdir::WalkDir;
 
 mod analytics_tab;
+mod theming;
+mod thumbnails;
+mod vcard_fmt;
+
+use thumbnails::{thumb_placeholder, PreviewCache, ThumbJob, ThumbReady, ThumbnailLoader};
+use vcard_fmt::{
+    format_vcard_address, format_vcard_name, parse_vcard_property, unfold_vcard_lines,
+    vcard_escape, vcard_phone_type_from_params, vcard_phone_type_label, vcard_unescape,
+};
 
 /// Result slot for the media grid query: (rows for the current page, total count).
 type PendingMediaSlot = Arc<Mutex<Option<(Vec<AttachmentRow>, usize)>>>;
@@ -10513,121 +10521,6 @@ fn find_duplicate_groups(db_path: &str) -> Vec<Vec<ContactSummary>> {
     groups
 }
 
-fn vcard_escape(value: &str) -> String {
-    let mut out = value.replace('\\', "\\\\");
-    out = out.replace('\n', "\\n");
-    out = out.replace(';', "\\;");
-    out = out.replace(',', "\\,");
-    out
-}
-
-fn vcard_unescape(value: &str) -> String {
-    let mut out = String::new();
-    let mut chars = value.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            if let Some(next) = chars.next() {
-                match next {
-                    'n' | 'N' => out.push('\n'),
-                    ',' => out.push(','),
-                    ';' => out.push(';'),
-                    '\\' => out.push('\\'),
-                    other => out.push(other),
-                }
-            } else {
-                out.push('\\');
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
-fn unfold_vcard_lines(contents: &str) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
-    for raw in contents.lines() {
-        if raw.starts_with(' ') || raw.starts_with('\t') {
-            if let Some(last) = lines.last_mut() {
-                last.push_str(raw.trim_start());
-            }
-        } else {
-            lines.push(raw.trim_end().to_string());
-        }
-    }
-    lines
-}
-
-fn parse_vcard_property(raw: &str) -> (String, Vec<String>) {
-    let mut parts = raw.split(';');
-    let name = parts.next().unwrap_or("").trim().to_ascii_uppercase();
-    let mut types = Vec::new();
-    for part in parts {
-        let mut iter = part.splitn(2, '=');
-        let key = iter.next().unwrap_or("").trim().to_ascii_lowercase();
-        let value = iter.next().unwrap_or("").trim();
-        if key == "type" {
-            for t in value.split(',') {
-                let trimmed = t.trim();
-                if !trimmed.is_empty() {
-                    types.push(trimmed.to_ascii_lowercase());
-                }
-            }
-        }
-    }
-    (name, types)
-}
-
-fn vcard_phone_type_label(value: &str) -> &'static str {
-    match value {
-        "mobile" => "CELL",
-        "home" => "HOME",
-        "work" => "WORK",
-        _ => "VOICE",
-    }
-}
-
-fn vcard_phone_type_from_params(types: &[String]) -> String {
-    for t in types {
-        match t.as_str() {
-            "cell" | "mobile" => return "mobile".to_string(),
-            "home" => return "home".to_string(),
-            "work" => return "work".to_string(),
-            _ => {}
-        }
-    }
-    String::new()
-}
-
-fn format_vcard_name(value: &str) -> String {
-    let parts: Vec<&str> = value.split(';').collect();
-    let family = parts.first().copied().unwrap_or_default();
-    let given = parts.get(1).copied().unwrap_or_default();
-    let additional = parts.get(2).copied().unwrap_or_default();
-    let prefix = parts.get(3).copied().unwrap_or_default();
-    let suffix = parts.get(4).copied().unwrap_or_default();
-    let mut out = Vec::new();
-    for part in [prefix, given, additional, family, suffix] {
-        let trimmed = part.trim();
-        if !trimmed.is_empty() {
-            out.push(trimmed);
-        }
-    }
-    out.join(" ")
-}
-
-fn format_vcard_address(value: &str) -> String {
-    let parts: Vec<&str> = value.split(';').collect();
-    let mut out = Vec::new();
-    for part in parts {
-        let trimmed = part.trim();
-        if !trimmed.is_empty() {
-            out.push(trimmed);
-        }
-    }
-    out.join(" ")
-}
-
 fn build_csv_header_map(headers: &csv::StringRecord) -> HashMap<String, usize> {
     let mut map = HashMap::new();
     for (idx, name) in headers.iter().enumerate() {
@@ -12419,190 +12312,6 @@ fn run_embed_job_ollama(
     })
 }
 
-struct PreviewCache {
-    dir: std::path::PathBuf,
-    max_bytes: u64,
-    current_bytes: u64,
-    last_scan: Instant,
-}
-
-impl PreviewCache {
-    fn new(dir: std::path::PathBuf, max_bytes: u64) -> Self {
-        Self {
-            dir,
-            max_bytes,
-            current_bytes: 0,
-            last_scan: Instant::now(),
-        }
-    }
-
-    fn rescan(&mut self) {
-        let mut total = 0u64;
-        if let Ok(entries) = fs::read_dir(&self.dir) {
-            for entry in entries.flatten() {
-                if let Ok(meta) = entry.metadata() {
-                    if meta.is_file() {
-                        total = total.saturating_add(meta.len());
-                    }
-                }
-            }
-        }
-        self.current_bytes = total;
-        self.last_scan = Instant::now();
-    }
-
-    fn prune_if_needed(&mut self) {
-        if self.current_bytes <= self.max_bytes {
-            return;
-        }
-        let mut entries: Vec<(std::path::PathBuf, u64, SystemTime)> = Vec::new();
-        if let Ok(read_dir) = fs::read_dir(&self.dir) {
-            for entry in read_dir.flatten() {
-                let path = entry.path();
-                if let Ok(meta) = entry.metadata() {
-                    if meta.is_file() {
-                        let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-                        entries.push((path, meta.len(), modified));
-                    }
-                }
-            }
-        }
-        entries.sort_by_key(|(_, _, modified)| *modified);
-        for (path, size, _) in entries {
-            if self.current_bytes <= self.max_bytes {
-                break;
-            }
-            if fs::remove_file(&path).is_ok() {
-                self.current_bytes = self.current_bytes.saturating_sub(size);
-            }
-        }
-    }
-}
-
-/// A decode request handed to a background thumbnail worker.
-struct ThumbJob {
-    key: String,
-    file_path: Option<std::path::PathBuf>,
-    thumb_path: Option<std::path::PathBuf>,
-    mime: String,
-    cache_dir: std::path::PathBuf,
-}
-
-/// A decoded thumbnail (or a failure) ready to upload on the UI thread.
-enum ThumbReady {
-    Ok(String, egui::ColorImage),
-    Fail(String),
-}
-
-/// Background thumbnail decoder: worker threads resolve/generate a preview
-/// and decode it to a `ColorImage` off the UI thread; the UI thread uploads
-/// the result to a texture. `inflight`/`failed` dedupe requests so a given
-/// key is only decoded once.
-struct ThumbnailLoader {
-    tx: crossbeam_channel::Sender<ThumbJob>,
-    rx: crossbeam_channel::Receiver<ThumbReady>,
-    inflight: std::collections::HashSet<String>,
-    failed: std::collections::HashSet<String>,
-    _workers: Vec<JoinHandle<()>>,
-}
-
-impl Default for ThumbnailLoader {
-    fn default() -> Self {
-        let (job_tx, job_rx) = crossbeam_channel::unbounded::<ThumbJob>();
-        let (res_tx, res_rx) = crossbeam_channel::unbounded::<ThumbReady>();
-        let workers = (0..3)
-            .map(|_| {
-                let job_rx = job_rx.clone();
-                let res_tx = res_tx.clone();
-                std::thread::spawn(move || {
-                    while let Ok(job) = job_rx.recv() {
-                        let ready = match decode_thumb_job(&job) {
-                            Some(img) => ThumbReady::Ok(job.key, img),
-                            None => ThumbReady::Fail(job.key),
-                        };
-                        if res_tx.send(ready).is_err() {
-                            break;
-                        }
-                    }
-                })
-            })
-            .collect();
-        Self {
-            tx: job_tx,
-            rx: res_rx,
-            inflight: std::collections::HashSet::new(),
-            failed: std::collections::HashSet::new(),
-            _workers: workers,
-        }
-    }
-}
-
-impl ThumbnailLoader {
-    /// Enqueue a decode unless the key is already cached-in-flight or has
-    /// previously failed (so we don't hammer unreadable files every frame).
-    fn request(&mut self, job: ThumbJob) {
-        if self.inflight.contains(&job.key) || self.failed.contains(&job.key) {
-            return;
-        }
-        self.inflight.insert(job.key.clone());
-        let _ = self.tx.send(job);
-    }
-}
-
-/// Resolve a job's source image (a DB thumbnail, or a freshly generated
-/// preview) and decode it to a `ColorImage`, capping the long edge so GPU
-/// uploads stay cheap. Runs on a worker thread.
-fn decode_thumb_job(job: &ThumbJob) -> Option<egui::ColorImage> {
-    let source = if let Some(thumb) = &job.thumb_path {
-        thumb.clone()
-    } else {
-        let file = job.file_path.as_ref()?;
-        if !file.exists() {
-            return None;
-        }
-        let preview = preview_path_for(file, &job.cache_dir);
-        if !preview.exists() {
-            let _ = fs::create_dir_all(&job.cache_dir);
-            generate_thumbnail_for_mime(file, &preview, 256, &job.mime).ok()?;
-        }
-        preview
-    };
-    let img = image::open(&source).ok()?;
-    let img = if img.width().max(img.height()) > 640 {
-        img.thumbnail(640, 640)
-    } else {
-        img
-    };
-    let rgba = img.to_rgba8();
-    let size = [rgba.width() as usize, rgba.height() as usize];
-    Some(egui::ColorImage::from_rgba_unmultiplied(size, &rgba))
-}
-
-/// A neutral square placeholder shown while a thumbnail decodes in the
-/// background (keeps grid layout stable so items don't reflow when the real
-/// image pops in).
-fn thumb_placeholder(ui: &mut egui::Ui, edge: f32) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(edge, edge), egui::Sense::hover());
-    ui.painter()
-        .rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
-}
-
-fn preview_path_for(source: &Path, cache_dir: &Path) -> std::path::PathBuf {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(source.to_string_lossy().as_bytes());
-    if let Ok(meta) = fs::metadata(source) {
-        hasher.update(&meta.len().to_le_bytes());
-        if let Ok(modified) = meta.modified() {
-            if let Ok(duration) = modified.duration_since(SystemTime::UNIX_EPOCH) {
-                hasher.update(&duration.as_secs().to_le_bytes());
-                hasher.update(&duration.subsec_nanos().to_le_bytes());
-            }
-        }
-    }
-    let hash = hasher.finalize().to_hex().to_string();
-    cache_dir.join(format!("{}.jpg", hash))
-}
-
 fn encode_f32_vec(vector: &[f32]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(vector.len() * 4);
     for v in vector {
@@ -12671,121 +12380,6 @@ fn device_from_string(value: &str) -> DevicePreference {
     }
 }
 
-/// Apply the app's cohesive dark theme. The theme is deliberately locked to
-/// dark: many hand-painted analytics charts hard-code dark-background colors,
-/// so following the OS into light mode produced white-on-light contrast bugs.
-fn configure_style(ctx: &egui::Context) {
-    use egui::{Color32, FontFamily, FontId, Margin, Rounding, Stroke, TextStyle};
-
-    let accent = Color32::from_rgb(122, 162, 247); // soft indigo
-    let accent_dim = Color32::from_rgb(88, 116, 180);
-
-    let mut visuals = egui::Visuals::dark();
-    visuals.selection.bg_fill = accent.linear_multiply(0.45);
-    visuals.selection.stroke = Stroke::new(1.0, accent);
-    visuals.hyperlink_color = accent;
-    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, accent_dim);
-    visuals.widgets.active.bg_stroke = Stroke::new(1.5, accent);
-    visuals.panel_fill = Color32::from_gray(24);
-    visuals.window_fill = Color32::from_gray(28);
-    visuals.extreme_bg_color = Color32::from_gray(16);
-    let rounding = Rounding::same(6.0);
-    visuals.widgets.noninteractive.rounding = rounding;
-    visuals.widgets.inactive.rounding = rounding;
-    visuals.widgets.hovered.rounding = rounding;
-    visuals.widgets.active.rounding = rounding;
-    visuals.window_rounding = Rounding::same(8.0);
-    visuals.menu_rounding = rounding;
-
-    let mut style = (*ctx.style()).clone();
-    style.visuals = visuals;
-    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-    style.spacing.button_padding = egui::vec2(9.0, 5.0);
-    style.spacing.menu_margin = Margin::same(6.0);
-    style.text_styles = [
-        (
-            TextStyle::Heading,
-            FontId::new(20.0, FontFamily::Proportional),
-        ),
-        (TextStyle::Body, FontId::new(14.5, FontFamily::Proportional)),
-        (
-            TextStyle::Monospace,
-            FontId::new(13.5, FontFamily::Monospace),
-        ),
-        (
-            TextStyle::Button,
-            FontId::new(14.5, FontFamily::Proportional),
-        ),
-        (
-            TextStyle::Small,
-            FontId::new(11.5, FontFamily::Proportional),
-        ),
-    ]
-    .into();
-    ctx.set_style(style);
-}
-
-/// Procedurally-generated 64×64 app/taskbar icon (a chat bubble on an indigo
-/// tile) so the window isn't stuck with the default blank icon.
-fn app_icon() -> egui::IconData {
-    const S: i32 = 64;
-    let accent = [122u8, 162, 247, 255];
-    let bubble = [236u8, 239, 246, 255];
-    let mut rgba = vec![0u8; (S * S * 4) as usize];
-    let mut put = |x: i32, y: i32, c: [u8; 4]| {
-        if (0..S).contains(&x) && (0..S).contains(&y) {
-            let i = ((y * S + x) * 4) as usize;
-            rgba[i..i + 4].copy_from_slice(&c);
-        }
-    };
-    let in_rounded = |x: i32, y: i32, x0: i32, y0: i32, x1: i32, y1: i32, r: i32| -> bool {
-        if x < x0 || x > x1 || y < y0 || y > y1 {
-            return false;
-        }
-        let (in_l, in_r) = (x < x0 + r, x > x1 - r);
-        let (in_t, in_b) = (y < y0 + r, y > y1 - r);
-        if (in_l || in_r) && (in_t || in_b) {
-            let cx = if in_l { x0 + r } else { x1 - r };
-            let cy = if in_t { y0 + r } else { y1 - r };
-            let (dx, dy) = ((x - cx) as f32, (y - cy) as f32);
-            return dx * dx + dy * dy <= (r * r) as f32;
-        }
-        true
-    };
-    for y in 0..S {
-        for x in 0..S {
-            if in_rounded(x, y, 0, 0, S - 1, S - 1, 13) {
-                put(x, y, accent);
-            }
-        }
-    }
-    let (bx0, by0, bx1, by1) = (13, 15, 50, 41);
-    for y in by0..=by1 {
-        for x in bx0..=bx1 {
-            if in_rounded(x, y, bx0, by0, bx1, by1, 8) {
-                put(x, y, bubble);
-            }
-        }
-    }
-    for k in 0..7 {
-        for x in (22 - k)..22 {
-            put(x, by1 + k, bubble);
-        }
-    }
-    for (ly, x0, x1) in [(23, 19, 44), (30, 19, 38)] {
-        for x in x0..=x1 {
-            for dy in 0..3 {
-                put(x, ly + dy, accent);
-            }
-        }
-    }
-    egui::IconData {
-        rgba,
-        width: S as u32,
-        height: S as u32,
-    }
-}
-
 fn main() {
     let log_dir = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
@@ -12797,14 +12391,14 @@ fn main() {
             .with_title("SMS Archive")
             .with_inner_size([1120.0, 760.0])
             .with_min_inner_size([760.0, 500.0])
-            .with_icon(std::sync::Arc::new(app_icon())),
+            .with_icon(std::sync::Arc::new(theming::app_icon())),
         ..Default::default()
     };
     if let Err(err) = eframe::run_native(
         "SMS Archive",
         options,
         Box::new(|cc| {
-            configure_style(&cc.egui_ctx);
+            theming::configure_style(&cc.egui_ctx);
             let app = SmsArchiveApp {
                 log_guard: guard,
                 ..Default::default()
