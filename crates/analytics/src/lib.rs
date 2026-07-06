@@ -62,7 +62,9 @@ pub use insights::{
     InsightCtx,
 };
 pub use media::{classify_media, MediaCategory};
-pub use orchestrator::{compute_for_contact, OrchestratorConfig, OrchestratorOutput};
+pub use orchestrator::{
+    compute_for_all_contacts, compute_for_contact, OrchestratorConfig, OrchestratorOutput,
+};
 pub use patterns::{contains_link, is_apology, is_encouragement, is_laugh, is_question};
 pub use rating::{
     compute_rating, RatingConfidence, RatingInput, RatingOutput, RatingThresholds, RatingWeights,

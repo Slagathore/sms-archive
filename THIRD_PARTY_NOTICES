@@ -1,0 +1,93 @@
+THIRD-PARTY NOTICES
+===================
+
+SMS Archive Manager ("sms-archive" / "sms") is licensed under either of the
+MIT license (see LICENSE-MIT) or the Apache License, Version 2.0 (see
+LICENSE-APACHE), at your option.
+
+This distribution also includes, links against, or shells out to third-party
+software, each under its own license. This file aggregates those notices.
+
+This is a manually-curated summary of the most notable runtime components.
+It is intentionally partial: the Rust dependency tree for this workspace
+numbers in the hundreds of crates (transitively), and the authoritative,
+complete, per-crate license text is machine-generated from Cargo.lock via
+`cargo about` (https://github.com/EmbarkStudios/cargo-about), configured by
+`about.toml` at the repository root. See docs/RELEASE.md for the exact
+commands to regenerate the full report. If anything in this hand-curated
+section ever disagrees with the generated report, the generated report is
+authoritative.
+
+-------------------------------------------------------------------------
+Bundled binary component
+-------------------------------------------------------------------------
+
+ONNX Runtime
+  License: MIT
+  Copyright (c) Microsoft Corporation
+  https://github.com/microsoft/onnxruntime
+  A prebuilt onnxruntime shared library (onnxruntime.dll / libonnxruntime.so
+  / libonnxruntime.dylib) is downloaded by the `ort` crate at build time and
+  copied next to the sms-archive/sms executables when packaging a release
+  (see scripts/package_release.ps1 and .github/workflows/release.yml). Its
+  full license text is available at the URL above.
+
+-------------------------------------------------------------------------
+External tools invoked at runtime (NOT bundled or distributed)
+-------------------------------------------------------------------------
+
+The application shells out to the following system tools via subprocess
+invocation. They are NOT linked into, embedded in, or distributed with this
+application's binaries or release archives — users install them separately,
+and each remains under its own upstream license:
+
+  FFmpeg      - https://ffmpeg.org/            (LGPL/GPL, build-dependent)
+                Used for video keyframe extraction and as a fallback image
+                decoder (e.g. HEIC/HEIF). Invoked as the `ffmpeg` executable
+                on PATH.
+  Tesseract   - https://github.com/tesseract-ocr/tesseract  (Apache-2.0)
+                Optional OCR support. Invoked as the `tesseract` executable
+                on PATH.
+  libheif     - https://github.com/strukturag/libheif  (LGPL-3.0)
+                Optional native HEIC/HEIF decoding path; not required (the
+                ffmpeg fallback above covers HEIC without it) and not
+                bundled.
+
+Because these are invoked as separate system processes rather than statically
+or dynamically linked into sms-archive/sms, their (L)GPL terms govern only
+the separately-installed tool itself, not this application.
+
+-------------------------------------------------------------------------
+Rust dependency tree (crates.io)
+-------------------------------------------------------------------------
+
+The workspace's direct dependencies are declared in the root Cargo.toml
+under [workspace.dependencies]; the full transitive set is resolved via
+Cargo.lock. Notable direct dependencies and their licenses, at time of
+writing (see about.toml's `accepted` list for the full set of license types
+covered):
+
+  tokio                    MIT
+  serde / serde_json       MIT OR Apache-2.0
+  rusqlite (bundles SQLite, Public Domain)   MIT
+  quick-xml                MIT OR Apache-2.0
+  egui / eframe            MIT OR Apache-2.0
+  image                    MIT OR Apache-2.0
+  tokenizers               Apache-2.0
+  ort (ONNX Runtime bindings)                MIT OR Apache-2.0
+  ndarray                  MIT OR Apache-2.0
+  clap                     MIT OR Apache-2.0
+  chrono                   MIT OR Apache-2.0
+  uuid                     MIT OR Apache-2.0
+  regex                    MIT OR Apache-2.0
+  rfd                      MIT OR Apache-2.0
+  ureq                     MIT OR Apache-2.0
+
+For the complete, generated-from-Cargo.lock inventory covering every
+transitive dependency, run:
+
+    cargo install cargo-about
+    cargo about generate --workspace --format json -o third-party-licenses.json
+
+and consult the resulting third-party-licenses.json (not checked into this
+repository, since it is regenerated from Cargo.lock and can be large).

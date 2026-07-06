@@ -88,6 +88,7 @@ struct SmsArchiveApp {
     import_pause_start: Option<Instant>,
     import_total_paused: Duration,
     thumbnail_cache: LruCache<String, egui::TextureHandle>,
+    thumbnail_loader: ThumbnailLoader,
     last_frame: Instant,
     frame_ms_ema: f32,
     preview_cache: Option<PreviewCache>,
@@ -406,6 +407,7 @@ impl Default for SmsArchiveApp {
             import_pause_start: None,
             import_total_paused: Duration::ZERO,
             thumbnail_cache: LruCache::new(NonZeroUsize::new(256).unwrap()),
+            thumbnail_loader: ThumbnailLoader::default(),
             last_frame: Instant::now(),
             frame_ms_ema: 0.0,
             show_perf: false,
@@ -1001,6 +1003,8 @@ impl eframe::App for SmsArchiveApp {
         } else {
             self.frame_ms_ema = (self.frame_ms_ema * 0.9) + (frame_ms * 0.1);
         }
+
+        self.pump_thumbnails(ctx);
 
         if let Some(results) = self.take_pending_results() {
             self.results = results;
@@ -2088,11 +2092,13 @@ impl eframe::App for SmsArchiveApp {
             });
 
                 ui.horizontal(|ui| {
-                    ui.label("Since (ms):")
-                        .on_hover_text("Only include messages after this timestamp (ms).");
+                    ui.label("Since:").on_hover_text(
+                        "Only include messages on/after this date. Accepts YYYY-MM-DD or epoch ms.",
+                    );
                     ui.text_edit_singleline(&mut self.search_filters.since);
-                    ui.label("Until (ms):")
-                        .on_hover_text("Only include messages before this timestamp (ms).");
+                    ui.label("Until:").on_hover_text(
+                        "Only include messages on/before this date. Accepts YYYY-MM-DD or epoch ms.",
+                    );
                     ui.text_edit_singleline(&mut self.search_filters.until);
                     ui.label("Thread limit:")
                         .on_hover_text("Maximum messages to load for full thread view.");
@@ -2328,26 +2334,23 @@ impl eframe::App for SmsArchiveApp {
                                                                 }
                                                             });
                                                         }
-                                                        let preview_path = self.preview_for_attachment(
+                                                        if let Some(texture) = self.thumbnail_for(
                                                             file_path.as_ref(),
                                                             thumb_path.as_ref(),
                                                             &att.mime_type,
-                                                        );
-                                                        if let Some(path) = preview_path.as_ref() {
-                                                            if let Some(texture) =
-                                                                self.load_thumbnail_texture(ctx, path)
-                                                            {
-                                                                let size = texture.size_vec2();
-                                                                let max_edge = 160.0;
-                                                                let scale =
-                                                                    (max_edge / size.x).min(max_edge / size.y).min(1.0);
-                                                                let draw_size =
-                                                                    egui::vec2(size.x * scale, size.y * scale);
-                                                                ui.add(egui::Image::new(SizedTexture::new(
-                                                                    texture.id(),
-                                                                    draw_size,
-                                                                )));
-                                                            }
+                                                        ) {
+                                                            let size = texture.size_vec2();
+                                                            let max_edge = 160.0;
+                                                            let scale =
+                                                                (max_edge / size.x).min(max_edge / size.y).min(1.0);
+                                                            let draw_size =
+                                                                egui::vec2(size.x * scale, size.y * scale);
+                                                            ui.add(egui::Image::new(SizedTexture::new(
+                                                                texture.id(),
+                                                                draw_size,
+                                                            )));
+                                                        } else {
+                                                            thumb_placeholder(ui, 160.0);
                                                         }
                                                     }
                                                 }
@@ -2493,27 +2496,23 @@ impl eframe::App for SmsArchiveApp {
                                         }
                                     });
 
-                                    let preview_path = self.preview_for_attachment(
+                                    if let Some(texture) = self.thumbnail_for(
                                         file_path.as_ref(),
                                         thumb_path.as_ref(),
                                         &att.mime_type,
-                                    );
-                                    if let Some(path) = preview_path.as_ref() {
-                                        if let Some(texture) = self.load_thumbnail_texture(ctx, path)
-                                        {
-                                            let size = texture.size_vec2();
-                                            let max_edge = 180.0;
-                                            let scale = (max_edge / size.x)
-                                                .min(max_edge / size.y)
-                                                .min(1.0);
-                                            let draw_size = egui::vec2(size.x * scale, size.y * scale);
-                                            columns[1].add(egui::Image::new(SizedTexture::new(
-                                                texture.id(),
-                                                draw_size,
-                                            )));
-                                        } else {
-                                            columns[1].label("Preview unavailable");
-                                        }
+                                    ) {
+                                        let size = texture.size_vec2();
+                                        let max_edge = 180.0;
+                                        let scale = (max_edge / size.x)
+                                            .min(max_edge / size.y)
+                                            .min(1.0);
+                                        let draw_size = egui::vec2(size.x * scale, size.y * scale);
+                                        columns[1].add(egui::Image::new(SizedTexture::new(
+                                            texture.id(),
+                                            draw_size,
+                                        )));
+                                    } else {
+                                        thumb_placeholder(&mut columns[1], 180.0);
                                     }
                                 }
                             }
@@ -3029,27 +3028,24 @@ impl eframe::App for SmsArchiveApp {
                                                             .as_ref()
                                                             .and_then(|rel| self.resolve_media_path(rel))
                                                             .filter(|p| p.exists());
-                                                        let preview_path = self.preview_for_attachment(
+                                                        if let Some(texture) = self.thumbnail_for(
                                                             file_path.as_ref(),
                                                             thumb_path.as_ref(),
                                                             &hit.attachment.mime_type,
-                                                        );
-                                                        if let Some(path) = preview_path.as_ref() {
-                                                            if let Some(texture) =
-                                                                self.load_thumbnail_texture(ctx, path)
-                                                            {
-                                                                let size = texture.size_vec2();
-                                                                let max_edge = 72.0;
-                                                                let scale = (max_edge / size.x)
-                                                                    .min(max_edge / size.y)
-                                                                    .min(1.0);
-                                                                let draw_size =
-                                                                    egui::vec2(size.x * scale, size.y * scale);
-                                                                ui.add(egui::Image::new(SizedTexture::new(
-                                                                    texture.id(),
-                                                                    draw_size,
-                                                                )));
-                                                            }
+                                                        ) {
+                                                            let size = texture.size_vec2();
+                                                            let max_edge = 72.0;
+                                                            let scale = (max_edge / size.x)
+                                                                .min(max_edge / size.y)
+                                                                .min(1.0);
+                                                            let draw_size =
+                                                                egui::vec2(size.x * scale, size.y * scale);
+                                                            ui.add(egui::Image::new(SizedTexture::new(
+                                                                texture.id(),
+                                                                draw_size,
+                                                            )));
+                                                        } else {
+                                                            thumb_placeholder(ui, 72.0);
                                                         }
                                                     if let Some(path) =
                                                         self.resolve_media_path(&hit.attachment.file_path)
@@ -3422,23 +3418,22 @@ impl eframe::App for SmsArchiveApp {
                                             self.start_media_embedding_inspect(att);
                                         }
                                             });
-                                            let preview_path = self.preview_for_attachment(
+                                            if let Some(texture) = self.thumbnail_for(
                                                 file_path.as_ref(),
                                                 thumb_path.as_ref(),
                                                 &att.mime_type,
-                                            );
-                                            if let Some(path) = preview_path.as_ref() {
-                                                if let Some(texture) = self.load_thumbnail_texture(ctx, path) {
-                                                    let size = texture.size_vec2();
-                                                    let max_edge = 180.0;
-                                                    let scale =
-                                                        (max_edge / size.x).min(max_edge / size.y).min(1.0);
-                                                    let draw_size = egui::vec2(size.x * scale, size.y * scale);
-                                                    ui.add(egui::Image::new(SizedTexture::new(
-                                                        texture.id(),
-                                                        draw_size,
-                                                    )));
-                                                }
+                                            ) {
+                                                let size = texture.size_vec2();
+                                                let max_edge = 180.0;
+                                                let scale =
+                                                    (max_edge / size.x).min(max_edge / size.y).min(1.0);
+                                                let draw_size = egui::vec2(size.x * scale, size.y * scale);
+                                                ui.add(egui::Image::new(SizedTexture::new(
+                                                    texture.id(),
+                                                    draw_size,
+                                                )));
+                                            } else {
+                                                thumb_placeholder(ui, 180.0);
                                             }
                                             if let Some(text) = att.ocr_text.as_ref() {
                                                 ui.group(|ui| {
@@ -3584,7 +3579,10 @@ impl eframe::App for SmsArchiveApp {
                     if ui.button("Sync names from XML").clicked() {
                         self.import_contacts_from_xml();
                     }
-                    if ui.button("Test XML sync (workspace)").clicked() {
+                    // Developer-only diagnostic; hidden unless SMS_DEBUG_TOOLS=1.
+                    if debug_tools_enabled()
+                        && ui.button("Test XML sync (workspace)").clicked()
+                    {
                         self.test_contact_name_sync_workspace_xml();
                     }
                     if ui.button("Find duplicates").clicked() {
@@ -8908,53 +8906,73 @@ impl SmsArchiveApp {
         self.import_pause_start = None;
     }
 
-    fn load_thumbnail_texture(
-        &mut self,
-        ctx: &egui::Context,
-        path: &Path,
-    ) -> Option<egui::TextureHandle> {
-        let key = path.to_string_lossy().to_string();
-        if let Some(entry) = self.thumbnail_cache.get(&key) {
-            return Some(entry.clone());
-        }
-        let image = image::open(path).ok()?;
-        let image = image.to_rgba8();
-        let size = [image.width() as usize, image.height() as usize];
-        let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &image);
-        let texture = ctx.load_texture(key.clone(), color_image, egui::TextureOptions::LINEAR);
-        self.thumbnail_cache.put(key, texture.clone());
-        Some(texture)
-    }
-
-    fn preview_for_attachment(
+    /// Return a ready thumbnail texture for an attachment, or `None` while it
+    /// decodes in the background. Decoding (and ffmpeg/HEIC thumbnail
+    /// generation) happens on worker threads — previously this blocked the UI
+    /// thread with `image::open` and ffmpeg shell-outs inside the render pass,
+    /// the single biggest source of media-browsing jank.
+    fn thumbnail_for(
         &mut self,
         file_path: Option<&std::path::PathBuf>,
         thumb_path: Option<&std::path::PathBuf>,
         mime_type: &str,
-    ) -> Option<std::path::PathBuf> {
-        if let Some(path) = thumb_path {
-            return Some(path.clone());
+    ) -> Option<egui::TextureHandle> {
+        let key = thumb_path.or(file_path)?.to_string_lossy().to_string();
+        if let Some(entry) = self.thumbnail_cache.get(&key) {
+            return Some(entry.clone());
         }
-        let file_path = file_path?;
-        if !file_path.exists() {
-            return None;
+        // A DB-provided thumbnail is decoded directly; otherwise we need the
+        // preview cache dir to generate one into.
+        let cache_dir = if thumb_path.is_some() {
+            std::path::PathBuf::new()
+        } else {
+            self.ensure_preview_cache()?.dir.clone()
+        };
+        self.thumbnail_loader.request(ThumbJob {
+            key,
+            file_path: file_path.cloned(),
+            thumb_path: thumb_path.cloned(),
+            mime: mime_type.to_string(),
+            cache_dir,
+        });
+        None
+    }
+
+    /// Drain decoded thumbnails, upload them to GPU textures, and keep the
+    /// preview cache bounded. Called once per frame.
+    fn pump_thumbnails(&mut self, ctx: &egui::Context) {
+        let ready: Vec<ThumbReady> = self.thumbnail_loader.rx.try_iter().collect();
+        let mut uploaded = false;
+        for item in ready {
+            match item {
+                ThumbReady::Ok(key, color) => {
+                    let texture =
+                        ctx.load_texture(key.clone(), color, egui::TextureOptions::LINEAR);
+                    self.thumbnail_cache.put(key.clone(), texture);
+                    self.thumbnail_loader.inflight.remove(&key);
+                    uploaded = true;
+                }
+                ThumbReady::Fail(key) => {
+                    self.thumbnail_loader.inflight.remove(&key);
+                    self.thumbnail_loader.failed.insert(key);
+                }
+            }
         }
-        let cache = self.ensure_preview_cache()?;
-        let preview_path = preview_path_for(file_path, &cache.dir);
-        if preview_path.exists() {
-            return Some(preview_path);
+        // Keep polling while work is outstanding so results surface promptly
+        // even if the pointer is still.
+        if uploaded || !self.thumbnail_loader.inflight.is_empty() {
+            ctx.request_repaint();
         }
-        if let Err(_err) = generate_thumbnail_for_mime(file_path, &preview_path, 256, mime_type) {
-            // Silently skip — HEIC and video decode via the system ffmpeg, so
-            // this is only truly unsupported/corrupt media now. No need to
-            // spam the status bar.
-            return None;
+        // Workers write preview files directly, so prune by rescanning the
+        // directory rather than tracking bytes inline.
+        if uploaded {
+            if let Some(cache) = self.preview_cache.as_mut() {
+                if cache.last_scan.elapsed() > Duration::from_secs(20) {
+                    cache.rescan();
+                    cache.prune_if_needed();
+                }
+            }
         }
-        if let Ok(metadata) = fs::metadata(&preview_path) {
-            cache.current_bytes = cache.current_bytes.saturating_add(metadata.len());
-        }
-        cache.prune_if_needed();
-        Some(preview_path)
     }
 
     fn ensure_preview_cache(&mut self) -> Option<&mut PreviewCache> {
@@ -9009,11 +9027,11 @@ fn run_paged_fts_filtered(
         sql.push_str(" AND messages.message_type = ?");
         params.push(message_type.into());
     }
-    if let Some(since) = parse_i64(&filters.since) {
+    if let Some(since) = parse_filter_ms(&filters.since, false) {
         sql.push_str(" AND messages.timestamp >= ?");
         params.push(since.into());
     }
-    if let Some(until) = parse_i64(&filters.until) {
+    if let Some(until) = parse_filter_ms(&filters.until, true) {
         sql.push_str(" AND messages.timestamp <= ?");
         params.push(until.into());
     }
@@ -11238,13 +11256,34 @@ impl MessageTypeFilter {
     }
 }
 
-fn parse_i64(value: &str) -> Option<i64> {
+/// Parse a since/until filter that accepts either a raw epoch-millisecond
+/// value or a human `YYYY-MM-DD` date (interpreted in local time; `end_of_day`
+/// snaps a bare date to 23:59:59.999 so an "until" bound is inclusive).
+fn parse_filter_ms(value: &str, end_of_day: bool) -> Option<i64> {
+    use chrono::TimeZone;
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        None
-    } else {
-        trimmed.parse::<i64>().ok()
+        return None;
     }
+    if let Ok(ms) = trimmed.parse::<i64>() {
+        return Some(ms);
+    }
+    let date = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d").ok()?;
+    let naive = if end_of_day {
+        date.and_hms_milli_opt(23, 59, 59, 999)?
+    } else {
+        date.and_hms_opt(0, 0, 0)?
+    };
+    chrono::Local
+        .from_local_datetime(&naive)
+        .single()
+        .map(|dt| dt.timestamp_millis())
+}
+
+/// Developer diagnostics (like the workspace XML-sync test button) are hidden
+/// from the normal UI unless `SMS_DEBUG_TOOLS=1` is set.
+fn debug_tools_enabled() -> bool {
+    std::env::var("SMS_DEBUG_TOOLS").ok().as_deref() == Some("1")
 }
 
 fn parse_date_bound(value: &str, is_end: bool) -> Option<i64> {
@@ -12392,6 +12431,114 @@ impl PreviewCache {
     }
 }
 
+/// A decode request handed to a background thumbnail worker.
+struct ThumbJob {
+    key: String,
+    file_path: Option<std::path::PathBuf>,
+    thumb_path: Option<std::path::PathBuf>,
+    mime: String,
+    cache_dir: std::path::PathBuf,
+}
+
+/// A decoded thumbnail (or a failure) ready to upload on the UI thread.
+enum ThumbReady {
+    Ok(String, egui::ColorImage),
+    Fail(String),
+}
+
+/// Background thumbnail decoder: worker threads resolve/generate a preview
+/// and decode it to a `ColorImage` off the UI thread; the UI thread uploads
+/// the result to a texture. `inflight`/`failed` dedupe requests so a given
+/// key is only decoded once.
+struct ThumbnailLoader {
+    tx: crossbeam_channel::Sender<ThumbJob>,
+    rx: crossbeam_channel::Receiver<ThumbReady>,
+    inflight: std::collections::HashSet<String>,
+    failed: std::collections::HashSet<String>,
+    _workers: Vec<JoinHandle<()>>,
+}
+
+impl Default for ThumbnailLoader {
+    fn default() -> Self {
+        let (job_tx, job_rx) = crossbeam_channel::unbounded::<ThumbJob>();
+        let (res_tx, res_rx) = crossbeam_channel::unbounded::<ThumbReady>();
+        let workers = (0..3)
+            .map(|_| {
+                let job_rx = job_rx.clone();
+                let res_tx = res_tx.clone();
+                std::thread::spawn(move || {
+                    while let Ok(job) = job_rx.recv() {
+                        let ready = match decode_thumb_job(&job) {
+                            Some(img) => ThumbReady::Ok(job.key, img),
+                            None => ThumbReady::Fail(job.key),
+                        };
+                        if res_tx.send(ready).is_err() {
+                            break;
+                        }
+                    }
+                })
+            })
+            .collect();
+        Self {
+            tx: job_tx,
+            rx: res_rx,
+            inflight: std::collections::HashSet::new(),
+            failed: std::collections::HashSet::new(),
+            _workers: workers,
+        }
+    }
+}
+
+impl ThumbnailLoader {
+    /// Enqueue a decode unless the key is already cached-in-flight or has
+    /// previously failed (so we don't hammer unreadable files every frame).
+    fn request(&mut self, job: ThumbJob) {
+        if self.inflight.contains(&job.key) || self.failed.contains(&job.key) {
+            return;
+        }
+        self.inflight.insert(job.key.clone());
+        let _ = self.tx.send(job);
+    }
+}
+
+/// Resolve a job's source image (a DB thumbnail, or a freshly generated
+/// preview) and decode it to a `ColorImage`, capping the long edge so GPU
+/// uploads stay cheap. Runs on a worker thread.
+fn decode_thumb_job(job: &ThumbJob) -> Option<egui::ColorImage> {
+    let source = if let Some(thumb) = &job.thumb_path {
+        thumb.clone()
+    } else {
+        let file = job.file_path.as_ref()?;
+        if !file.exists() {
+            return None;
+        }
+        let preview = preview_path_for(file, &job.cache_dir);
+        if !preview.exists() {
+            let _ = fs::create_dir_all(&job.cache_dir);
+            generate_thumbnail_for_mime(file, &preview, 256, &job.mime).ok()?;
+        }
+        preview
+    };
+    let img = image::open(&source).ok()?;
+    let img = if img.width().max(img.height()) > 640 {
+        img.thumbnail(640, 640)
+    } else {
+        img
+    };
+    let rgba = img.to_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    Some(egui::ColorImage::from_rgba_unmultiplied(size, &rgba))
+}
+
+/// A neutral square placeholder shown while a thumbnail decodes in the
+/// background (keeps grid layout stable so items don't reflow when the real
+/// image pops in).
+fn thumb_placeholder(ui: &mut egui::Ui, edge: f32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(edge, edge), egui::Sense::hover());
+    ui.painter()
+        .rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
+}
+
 fn preview_path_for(source: &Path, cache_dir: &Path) -> std::path::PathBuf {
     let mut hasher = blake3::Hasher::new();
     hasher.update(source.to_string_lossy().as_bytes());
@@ -12476,17 +12623,140 @@ fn device_from_string(value: &str) -> DevicePreference {
     }
 }
 
+/// Apply the app's cohesive dark theme. The theme is deliberately locked to
+/// dark: many hand-painted analytics charts hard-code dark-background colors,
+/// so following the OS into light mode produced white-on-light contrast bugs.
+fn configure_style(ctx: &egui::Context) {
+    use egui::{Color32, FontFamily, FontId, Margin, Rounding, Stroke, TextStyle};
+
+    let accent = Color32::from_rgb(122, 162, 247); // soft indigo
+    let accent_dim = Color32::from_rgb(88, 116, 180);
+
+    let mut visuals = egui::Visuals::dark();
+    visuals.selection.bg_fill = accent.linear_multiply(0.45);
+    visuals.selection.stroke = Stroke::new(1.0, accent);
+    visuals.hyperlink_color = accent;
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, accent_dim);
+    visuals.widgets.active.bg_stroke = Stroke::new(1.5, accent);
+    visuals.panel_fill = Color32::from_gray(24);
+    visuals.window_fill = Color32::from_gray(28);
+    visuals.extreme_bg_color = Color32::from_gray(16);
+    let rounding = Rounding::same(6.0);
+    visuals.widgets.noninteractive.rounding = rounding;
+    visuals.widgets.inactive.rounding = rounding;
+    visuals.widgets.hovered.rounding = rounding;
+    visuals.widgets.active.rounding = rounding;
+    visuals.window_rounding = Rounding::same(8.0);
+    visuals.menu_rounding = rounding;
+
+    let mut style = (*ctx.style()).clone();
+    style.visuals = visuals;
+    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+    style.spacing.button_padding = egui::vec2(9.0, 5.0);
+    style.spacing.menu_margin = Margin::same(6.0);
+    style.text_styles = [
+        (
+            TextStyle::Heading,
+            FontId::new(20.0, FontFamily::Proportional),
+        ),
+        (TextStyle::Body, FontId::new(14.5, FontFamily::Proportional)),
+        (
+            TextStyle::Monospace,
+            FontId::new(13.5, FontFamily::Monospace),
+        ),
+        (
+            TextStyle::Button,
+            FontId::new(14.5, FontFamily::Proportional),
+        ),
+        (
+            TextStyle::Small,
+            FontId::new(11.5, FontFamily::Proportional),
+        ),
+    ]
+    .into();
+    ctx.set_style(style);
+}
+
+/// Procedurally-generated 64×64 app/taskbar icon (a chat bubble on an indigo
+/// tile) so the window isn't stuck with the default blank icon.
+fn app_icon() -> egui::IconData {
+    const S: i32 = 64;
+    let accent = [122u8, 162, 247, 255];
+    let bubble = [236u8, 239, 246, 255];
+    let mut rgba = vec![0u8; (S * S * 4) as usize];
+    let mut put = |x: i32, y: i32, c: [u8; 4]| {
+        if (0..S).contains(&x) && (0..S).contains(&y) {
+            let i = ((y * S + x) * 4) as usize;
+            rgba[i..i + 4].copy_from_slice(&c);
+        }
+    };
+    let in_rounded = |x: i32, y: i32, x0: i32, y0: i32, x1: i32, y1: i32, r: i32| -> bool {
+        if x < x0 || x > x1 || y < y0 || y > y1 {
+            return false;
+        }
+        let (in_l, in_r) = (x < x0 + r, x > x1 - r);
+        let (in_t, in_b) = (y < y0 + r, y > y1 - r);
+        if (in_l || in_r) && (in_t || in_b) {
+            let cx = if in_l { x0 + r } else { x1 - r };
+            let cy = if in_t { y0 + r } else { y1 - r };
+            let (dx, dy) = ((x - cx) as f32, (y - cy) as f32);
+            return dx * dx + dy * dy <= (r * r) as f32;
+        }
+        true
+    };
+    for y in 0..S {
+        for x in 0..S {
+            if in_rounded(x, y, 0, 0, S - 1, S - 1, 13) {
+                put(x, y, accent);
+            }
+        }
+    }
+    let (bx0, by0, bx1, by1) = (13, 15, 50, 41);
+    for y in by0..=by1 {
+        for x in bx0..=bx1 {
+            if in_rounded(x, y, bx0, by0, bx1, by1, 8) {
+                put(x, y, bubble);
+            }
+        }
+    }
+    for k in 0..7 {
+        for x in (22 - k)..22 {
+            put(x, by1 + k, bubble);
+        }
+    }
+    for (ly, x0, x1) in [(23, 19, 44), (30, 19, 38)] {
+        for x in x0..=x1 {
+            for dy in 0..3 {
+                put(x, ly + dy, accent);
+            }
+        }
+    }
+    egui::IconData {
+        rgba,
+        width: S as u32,
+        height: S as u32,
+    }
+}
+
 fn main() {
     let log_dir = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join("logs");
     let guard = init_logging(&log_dir).ok();
     tracing::info!("sms-archive started");
-    let options = eframe::NativeOptions::default();
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_title("SMS Archive")
+            .with_inner_size([1120.0, 760.0])
+            .with_min_inner_size([760.0, 500.0])
+            .with_icon(std::sync::Arc::new(app_icon())),
+        ..Default::default()
+    };
     if let Err(err) = eframe::run_native(
         "SMS Archive",
         options,
-        Box::new(|_cc| {
+        Box::new(|cc| {
+            configure_style(&cc.egui_ctx);
             let app = SmsArchiveApp {
                 log_guard: guard,
                 ..Default::default()

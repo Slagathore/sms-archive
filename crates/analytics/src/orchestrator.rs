@@ -38,7 +38,10 @@
 
 use crate::aggregator::{compute_aggregates, AggregatesOutput, AggregatorMessage, DailyBucket};
 use crate::flow::{build_conversation_flow, SankeyData};
-use crate::focus::{compute_focus, FocusOutput};
+use crate::focus::{
+    build_other_names_regex, clean_first_name_token, compute_focus, compute_focus_shared,
+    FocusOutput,
+};
 use crate::inside_jokes::{detect_inside_jokes, InsideJoke, InsideJokesConfig};
 use crate::insights::{compute_insights, EngineConfig, Insight, InsightCtx};
 use crate::rating::{compute_rating, RatingInput, RatingOutput, RatingThresholds, RatingWeights};
@@ -51,10 +54,12 @@ use crate::segmenter::segment_conversations;
 use crate::sentiment::{compute_sentiment_timeline, SentimentTimeline};
 use crate::topics::{build_phrase_counts, compute_topics, TopicPhrase, TopicsConfig};
 use crate::types::{Conversation, Participant, SegmentationConfig};
+use regex::Regex;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use sms_errors::{AppError, Result};
 use sms_types::MessageDirection;
+use std::collections::HashMap;
 use std::time::Instant;
 
 /// Bundle of all configuration the orchestrator needs. Built by the caller
@@ -108,6 +113,81 @@ pub struct OrchestratorOutput {
     pub had_data: bool,
 }
 
+/// Precomputed "other contact first names" context, shared across an entire
+/// analytics run instead of being rebuilt once per contact.
+///
+/// `focus.rs` needs, for every contact, a regex matching every *other*
+/// contact's first name. Naively that means one SQL query + one O(N)-size
+/// regex compile PER CONTACT — an O(N^2) full recompute. This struct is
+/// built ONCE (one query, one regex compile over ALL contacts) and reused:
+/// self-mentions are then filtered out of the match results per contact
+/// instead of being excluded by rebuilding the regex.
+///
+/// See [`build_shared_focus_context`] and [`compute_for_all_contacts`].
+struct SharedFocusContext {
+    /// Regex over every contact's cleaned first-name token. `None` when no
+    /// contact contributed a usable token (e.g. an empty contacts table).
+    other_names_re: Option<Regex>,
+    /// contact_id -> lower-cased first-name token, but ONLY for contacts
+    /// whose token is not shared with any other contact. A unique name must
+    /// be excluded from that contact's own "other" bucket (it's a
+    /// self-mention). A name shared by two or more contacts is deliberately
+    /// left out of this map — it remains a legitimate "other contact" match
+    /// from every other owner's point of view, matching the original
+    /// per-contact `WHERE id != ?` behavior exactly.
+    exclusive_self_token: HashMap<String, String>,
+}
+
+impl SharedFocusContext {
+    /// Look up the self-exclusion token for `contact_id`, if any.
+    fn self_token(&self, contact_id: &str) -> Option<&str> {
+        self.exclusive_self_token
+            .get(contact_id)
+            .map(|s| s.as_str())
+    }
+}
+
+/// Load every contact's display name once and derive the [`SharedFocusContext`]
+/// (master regex + per-contact self-exclusion tokens). Call this ONCE per
+/// analytics run — e.g. before looping over every contact — rather than once
+/// per contact.
+fn build_shared_focus_context(conn: &Connection) -> Result<SharedFocusContext> {
+    let mut stmt = conn
+        .prepare("SELECT id, display_name FROM contacts")
+        .map_err(AppError::Database)?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(AppError::Database)?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(stmt);
+
+    // One regex over every contact's name — built exactly once for the run.
+    let all_names: Vec<String> = rows.iter().map(|(_, name)| name.clone()).collect();
+    let other_names_re = build_other_names_regex(&all_names);
+
+    // Count how many contacts contribute each cleaned, lower-cased token so
+    // we only self-exclude names that are actually unique to one contact.
+    let mut token_counts: HashMap<String, u32> = HashMap::new();
+    let mut own_token: Vec<(String, String)> = Vec::new();
+    for (id, name) in &rows {
+        if let Some(token) = clean_first_name_token(name) {
+            let lower = token.to_lowercase();
+            *token_counts.entry(lower.clone()).or_insert(0) += 1;
+            own_token.push((id.clone(), lower));
+        }
+    }
+    let exclusive_self_token: HashMap<String, String> = own_token
+        .into_iter()
+        .filter(|(_, token)| token_counts.get(token).copied().unwrap_or(0) == 1)
+        .collect();
+
+    Ok(SharedFocusContext {
+        other_names_re,
+        exclusive_self_token,
+    })
+}
+
 /// Run the full analytics pipeline for one contact and persist the results.
 ///
 /// All writes happen in a single transaction. If any step fails, the
@@ -117,6 +197,51 @@ pub fn compute_for_contact(
     conn: &Connection,
     contact_id: &str,
     config: &OrchestratorConfig,
+) -> Result<OrchestratorOutput> {
+    compute_for_contact_inner(conn, contact_id, config, None)
+}
+
+/// Recompute analytics for every contact in the database.
+///
+/// This is the batch entry point: it loads the "other contact first names"
+/// context ONCE (see [`SharedFocusContext`]) and reuses it for every
+/// contact, turning what would otherwise be an O(N^2) full recompute (N
+/// contacts × an O(N)-size regex compiled per contact) into O(N) — one
+/// query, one regex compile, then a single linear pass per contact.
+///
+/// Returns `(contact_id, OrchestratorOutput)` pairs in the order contacts
+/// were processed. If any single contact fails, processing stops and the
+/// error is returned; contacts already processed keep their persisted
+/// results (each contact's writes are its own transaction).
+pub fn compute_for_all_contacts(
+    conn: &Connection,
+    config: &OrchestratorConfig,
+) -> Result<Vec<(String, OrchestratorOutput)>> {
+    let shared_focus = build_shared_focus_context(conn)?;
+
+    let mut stmt = conn
+        .prepare("SELECT id FROM contacts")
+        .map_err(AppError::Database)?;
+    let contact_ids: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .map_err(AppError::Database)?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(stmt);
+
+    let mut results = Vec::with_capacity(contact_ids.len());
+    for contact_id in contact_ids {
+        let output = compute_for_contact_inner(conn, &contact_id, config, Some(&shared_focus))?;
+        results.push((contact_id, output));
+    }
+    Ok(results)
+}
+
+fn compute_for_contact_inner(
+    conn: &Connection,
+    contact_id: &str,
+    config: &OrchestratorConfig,
+    shared_focus: Option<&SharedFocusContext>,
 ) -> Result<OrchestratorOutput> {
     let start = Instant::now();
 
@@ -166,8 +291,22 @@ pub fn compute_for_contact(
     // 5b. Direction-of-conversation focus. Pulls "other contact" first names
     // from the contacts table so mentions of e.g. mutual friends show up in
     // the "others" bucket of the donut.
-    let other_names = load_other_contact_first_names(conn, contact_id).unwrap_or_default();
-    let focus = compute_focus(&messages, &other_names);
+    //
+    // When called from `compute_for_all_contacts`, `shared_focus` carries a
+    // regex already built once for the whole run; we just filter out this
+    // contact's own (unique) name from the hits. Otherwise (single-contact
+    // path) fall back to the original per-contact query + regex build.
+    let focus = match shared_focus {
+        Some(ctx) => compute_focus_shared(
+            &messages,
+            ctx.other_names_re.as_ref(),
+            ctx.self_token(contact_id),
+        ),
+        None => {
+            let other_names = load_other_contact_first_names(conn, contact_id).unwrap_or_default();
+            compute_focus(&messages, &other_names)
+        }
+    };
 
     // 5c. Sentiment timeline (lexicon-based, per-day, per-side).
     let sentiment = compute_sentiment_timeline(&messages, config.tz_offset_secs);
@@ -1052,5 +1191,165 @@ mod tests {
         let out = compute_for_contact(conn, &contact_id, &config).unwrap();
         assert!(!out.had_data);
         assert_eq!(out.message_count, 0);
+    }
+
+    // ---------------------------------------------------------------
+    // compute_for_all_contacts: shared focus context + self-exclusion
+    // ---------------------------------------------------------------
+
+    /// Set up a temp DB with three contacts (Anna, Justin, Zack) who mention
+    /// each other by first name, so the shared-focus-context self-exclusion
+    /// logic actually gets exercised. Returns (db_file, name -> contact_id).
+    fn fixture_multi_contact_db() -> (
+        tempfile::NamedTempFile,
+        std::collections::HashMap<String, String>,
+    ) {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let db = Database::open(tmp.path(), ResourceProfile::Low).unwrap();
+        let conn = db.connection();
+
+        let defs = [
+            ("Anna", "5550000001"),
+            ("Justin", "5550000002"),
+            ("Zack", "5550000003"),
+        ];
+        let mut ids = std::collections::HashMap::new();
+        for (name, addr) in defs {
+            let id = Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO contacts (id, display_name, source) VALUES (?1, ?2, 'manual')",
+                params![id, name],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO contact_addresses (id, contact_id, address) VALUES (?1, ?2, ?3)",
+                params![Uuid::new_v4().to_string(), id, addr],
+            )
+            .unwrap();
+            ids.insert(name.to_string(), id);
+        }
+
+        // Anna's thread: someone calls her "Anna" by name (self-mention,
+        // must NOT count as an "other" hit) and mentions "Justin" (a
+        // genuine other contact, must count).
+        let anna_messages = [
+            (
+                1_000_000_000_000i64,
+                2,
+                "hey Anna are you around? tell Justin hi",
+            ), // Me
+            (1_000_000_060_000i64, 1, "yeah I'm here"), // Them
+        ];
+        for (i, (ts, dir, body)) in anna_messages.iter().enumerate() {
+            conn.execute(
+                "INSERT INTO messages (id, timestamp, address, body, body_searchable, message_type, message_direction) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)",
+                params![format!("anna-msg-{}", i), ts, "5550000001", body, body, dir],
+            )
+            .unwrap();
+        }
+
+        // Justin's thread: ordinary chatter, no name mentions at all.
+        let justin_messages = [
+            (1_000_000_000_000i64, 2, "what's up"), // Me
+            (1_000_000_060_000i64, 1, "not much"),  // Them
+        ];
+        for (i, (ts, dir, body)) in justin_messages.iter().enumerate() {
+            conn.execute(
+                "INSERT INTO messages (id, timestamp, address, body, body_searchable, message_type, message_direction) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)",
+                params![
+                    format!("justin-msg-{}", i),
+                    ts,
+                    "5550000002",
+                    body,
+                    body,
+                    dir
+                ],
+            )
+            .unwrap();
+        }
+
+        // Zack has no messages — exercises the had_data=false path inside a
+        // batch run alongside contacts that do have data.
+
+        drop(db);
+        (tmp, ids)
+    }
+
+    fn focus_pcts(conn: &Connection, contact_id: &str) -> (f64, f64, f64) {
+        conn.query_row(
+            "SELECT focus_me_pct, focus_them_pct, focus_other_pct FROM pair_analytics WHERE contact_id = ?1",
+            params![contact_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn compute_for_all_contacts_excludes_self_mentions_from_focus_other() {
+        let (tmp, ids) = fixture_multi_contact_db();
+        let db = Database::open(tmp.path(), ResourceProfile::Low).unwrap();
+        let conn = db.connection();
+        let config = OrchestratorConfig::default();
+
+        let results = compute_for_all_contacts(conn, &config).unwrap();
+        assert_eq!(results.len(), 3);
+
+        let anna_id = &ids["Anna"];
+        let (_, _, anna_other) = focus_pcts(conn, anna_id);
+        // The "Anna" self-mention must be excluded; the "Justin" mention
+        // must still land in the "other" bucket, so this is > 0 (not
+        // vacuously zero from both being dropped).
+        assert!(
+            anna_other > 0.0,
+            "Justin mention should still count as an other-contact hit"
+        );
+
+        let justin_id = &ids["Justin"];
+        let (_, _, justin_other) = focus_pcts(conn, justin_id);
+        assert_eq!(
+            justin_other, 0.0,
+            "Justin's thread never mentions another contact's name"
+        );
+
+        // Zack had no messages — batch run must still complete for him.
+        let zack_id = &ids["Zack"];
+        let zack_result = results.iter().find(|(id, _)| id == zack_id).unwrap();
+        assert!(!zack_result.1.had_data);
+    }
+
+    #[test]
+    fn compute_for_all_contacts_matches_per_contact_compute_for_contact() {
+        // Two identical fixture DBs (different UUIDs, same names/messages):
+        // one processed via the new batch entry point, one via the
+        // pre-existing per-contact call in a manual loop. Their persisted
+        // focus_* percentages must match exactly — the shared-regex +
+        // self-exclusion optimization must not change results.
+        let (tmp_batch, ids_batch) = fixture_multi_contact_db();
+        let (tmp_individual, ids_individual) = fixture_multi_contact_db();
+        let config = OrchestratorConfig::default();
+
+        let db_batch = Database::open(tmp_batch.path(), ResourceProfile::Low).unwrap();
+        let conn_batch = db_batch.connection();
+        compute_for_all_contacts(conn_batch, &config).unwrap();
+
+        let db_individual = Database::open(tmp_individual.path(), ResourceProfile::Low).unwrap();
+        let conn_individual = db_individual.connection();
+        for id in ids_individual.values() {
+            compute_for_contact(conn_individual, id, &config).unwrap();
+        }
+
+        // Zack has no messages, so no pair_analytics row is written for him
+        // in either path (see the early-return in `compute_for_contact_inner`
+        // for empty contacts) — only compare contacts that had data.
+        for name in ["Anna", "Justin"] {
+            let batch_pcts = focus_pcts(conn_batch, &ids_batch[name]);
+            let individual_pcts = focus_pcts(conn_individual, &ids_individual[name]);
+            assert_eq!(
+                batch_pcts, individual_pcts,
+                "focus percentages diverged for {name}"
+            );
+        }
     }
 }

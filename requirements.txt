@@ -1,5 +1,6 @@
 # SMS Archive - ML Model Setup Dependencies
-# Used by: scripts/setup_ml_models.py
+# Used by: scripts/setup_ml_models.py (required deps below)
+#          scripts/setup_marqo_nsfw.py (optional; see bottom of file)
 #
 # Install:
 #   pip install -r requirements.txt
@@ -8,13 +9,14 @@
 #   pip install onnxruntime-gpu>=1.17
 # and ensure CUDA 11.x/12.x is installed on your system.
 
-# PyTorch - for exporting models to ONNX
+# Hugging Face Hub - downloads the pre-converted CLIP1 ONNX bundle
+# (Xenova/clip-vit-large-patch14) into ml/CLIP1/. Required by the CLIP1 step.
+huggingface_hub>=0.24
+
+# PyTorch - for exporting the NSFW classifier MLP to ONNX
 # Install the CUDA build from https://pytorch.org/get-started/locally/ for GPU support.
 # Default CPU build:
 torch>=2.1
-
-# CLIP model (OpenAI ViT-L/14) - used for image and text embeddings
-open-clip-torch>=2.24
 
 # ONNX - model format and checker
 onnx>=1.15
@@ -28,3 +30,8 @@ tensorflow>=2.13
 
 # NumPy - array utilities for TF weight extraction
 numpy>=1.24
+
+# --- Optional: scripts/setup_marqo_nsfw.py (preferred NSFW model) ---
+# Not required by setup_ml_models.py; only needed if you also run the
+# Marqo NSFW export script.
+# timm>=1.0

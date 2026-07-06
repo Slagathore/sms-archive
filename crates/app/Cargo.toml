@@ -23,6 +23,7 @@ serde_json = { workspace = true }
 lru = { workspace = true }
 image = { workspace = true }
 blake3 = { workspace = true }
+crossbeam-channel = { workspace = true }
 rfd = { workspace = true }
 ureq = { workspace = true }
 chrono = { workspace = true }

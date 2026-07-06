@@ -41,14 +41,47 @@ pub struct FocusOutput {
 /// `other_first_names` should be a deduplicated list of first names belonging
 /// to *other* contacts (not the pair under analysis). Lower-cased; we
 /// case-insensitive-match in the regex layer.
+///
+/// This compiles the "other names" regex from `other_first_names` on every
+/// call. That's fine for a single contact, but callers recomputing analytics
+/// for *every* contact in the archive should use [`compute_focus_shared`]
+/// instead: it takes a regex built once (over every contact) plus a cheap
+/// per-contact self-exclusion token, so the O(N)-size regex is compiled a
+/// single time for the whole run instead of once per contact.
 pub fn compute_focus(messages: &[AggregatorMessage], other_first_names: &[String]) -> FocusOutput {
+    let other_re = build_other_names_regex(other_first_names);
+    compute_focus_matching(messages, other_re.as_ref(), None)
+}
+
+/// Compute focus percentages using a *pre-built* "other names" regex shared
+/// across an entire analytics run (e.g. built once from every contact in the
+/// archive, rather than once per contact — see `orchestrator::compute_for_all_contacts`).
+///
+/// Because the shared regex is built from *every* contact's name, it may
+/// also match the current contact's own first name. `self_exclude_token`
+/// (lower-cased) is used to discard those self-mentions from the "other"
+/// bucket, so results are identical to calling [`compute_focus`] with a list
+/// that explicitly excludes this contact. When the current contact's first
+/// name is shared with another contact, pass `None`: the name is still a
+/// legitimate "other contact" from that other contact's point of view, and
+/// the original per-contact behavior never excluded shared names either.
+pub(crate) fn compute_focus_shared(
+    messages: &[AggregatorMessage],
+    shared_other_names_re: Option<&Regex>,
+    self_exclude_token: Option<&str>,
+) -> FocusOutput {
+    compute_focus_matching(messages, shared_other_names_re, self_exclude_token)
+}
+
+/// Shared implementation for [`compute_focus`] and [`compute_focus_shared`].
+fn compute_focus_matching(
+    messages: &[AggregatorMessage],
+    other_re: Option<&Regex>,
+    self_exclude_token: Option<&str>,
+) -> FocusOutput {
     if messages.is_empty() {
         return FocusOutput::default();
     }
-
-    // Compile a single regex over all other-name candidates so we walk each
-    // body just once. Skip if the list is empty.
-    let other_re = build_other_names_regex(other_first_names);
 
     let mut about_me: u64 = 0;
     let mut about_them: u64 = 0;
@@ -59,8 +92,7 @@ pub fn compute_focus(messages: &[AggregatorMessage], other_first_names: &[String
         let me_count = ME_RE.find_iter(body).count() as u64;
         let you_count = YOU_RE.find_iter(body).count() as u64;
         let other_count = other_re
-            .as_ref()
-            .map(|re| re.find_iter(body).count() as u64)
+            .map(|re| count_other_hits(re, body, self_exclude_token))
             .unwrap_or(0);
 
         match msg.sender {
@@ -87,29 +119,48 @@ pub fn compute_focus(messages: &[AggregatorMessage], other_first_names: &[String
     }
 }
 
+/// Count regex hits in `body`, discarding any hit that case-insensitively
+/// equals `self_exclude_token` (used to drop self-mentions when matching
+/// against a shared, multi-contact regex).
+fn count_other_hits(re: &Regex, body: &str, self_exclude_token: Option<&str>) -> u64 {
+    match self_exclude_token {
+        None => re.find_iter(body).count() as u64,
+        Some(tok) => re
+            .find_iter(body)
+            .filter(|m| !m.as_str().eq_ignore_ascii_case(tok))
+            .count() as u64,
+    }
+}
+
+/// Clean a display name down to a safe, regex-matchable "first name" token.
+/// Picks the first whitespace-delimited token and strips everything but
+/// alphanumerics and apostrophes (so we never regex-inject). Returns `None`
+/// for names that don't survive cleaning (empty, or under 2 chars — single
+/// letters cause too many false-positive matches to be useful).
+pub(crate) fn clean_first_name_token(name: &str) -> Option<String> {
+    let t = name.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let first = t.split_whitespace().next().unwrap_or(t);
+    let safe: String = first
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '\'')
+        .collect();
+    if safe.len() < 2 {
+        None
+    } else {
+        Some(safe)
+    }
+}
+
 /// Build a single OR'd word-boundary regex from the supplied other-names list.
 /// Returns None if the list is empty (skip allocation).
-fn build_other_names_regex(names: &[String]) -> Option<Regex> {
+pub(crate) fn build_other_names_regex(names: &[String]) -> Option<Regex> {
     let cleaned: Vec<String> = names
         .iter()
-        .filter_map(|n| {
-            let t = n.trim();
-            if t.is_empty() {
-                return None;
-            }
-            // Pick the first whitespace-delimited token as a "first name".
-            // Strip non-alphanumeric for safety so we don't regex-inject.
-            let first = t.split_whitespace().next().unwrap_or(t);
-            let safe: String = first
-                .chars()
-                .filter(|c| c.is_alphanumeric() || *c == '\'')
-                .collect();
-            if safe.len() < 2 {
-                None
-            } else {
-                Some(regex::escape(&safe))
-            }
-        })
+        .filter_map(|n| clean_first_name_token(n))
+        .map(|safe| regex::escape(&safe))
         .collect();
     if cleaned.is_empty() {
         return None;
@@ -208,5 +259,74 @@ mod tests {
         let names = vec!["A".to_string(), "".to_string()];
         let out = compute_focus(&messages, &names);
         assert_eq!(out.focus_other_pct, 0.0);
+    }
+
+    // ---------------------------------------------------------------
+    // compute_focus_shared: shared regex + self-exclusion
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn shared_regex_matches_compute_focus_when_no_self_exclusion_needed() {
+        // A shared regex built over *all* contacts (Anna, Justin) should
+        // produce identical output to the per-contact `compute_focus` call
+        // when the current contact's own name isn't in the candidate set.
+        let messages = vec![
+            am(1, Participant::Me, "Anna and I are heading out"),
+            am(2, Participant::Them, "tell Justin hi"),
+        ];
+        let names = vec!["Anna".to_string(), "Justin".to_string()];
+        let expected = compute_focus(&messages, &names);
+
+        let shared_re = build_other_names_regex(&names);
+        let actual = compute_focus_shared(&messages, shared_re.as_ref(), None);
+
+        assert_eq!(actual.focus_me_pct, expected.focus_me_pct);
+        assert_eq!(actual.focus_them_pct, expected.focus_them_pct);
+        assert_eq!(actual.focus_other_pct, expected.focus_other_pct);
+    }
+
+    #[test]
+    fn shared_regex_excludes_self_mentions() {
+        // The shared regex is built from EVERY contact's name, including the
+        // contact whose thread we're currently scoring. A mention of that
+        // contact's own name must NOT count as an "other" mention — it must
+        // match `compute_focus` called with a names list that omits self.
+        let messages = vec![
+            am(1, Participant::Me, "Anna, are you free tonight?"),
+            am(2, Participant::Them, "tell Justin hi"),
+        ];
+        // Shared regex built from ALL contacts, including "Anna" (the
+        // contact under analysis) and "Justin" (a genuine other contact).
+        let all_names = vec!["Anna".to_string(), "Justin".to_string()];
+        let shared_re = build_other_names_regex(&all_names);
+
+        // Analyzing Anna's own thread: self-exclude "anna".
+        let with_exclusion = compute_focus_shared(&messages, shared_re.as_ref(), Some("anna"));
+
+        // Equivalent to calling compute_focus with Anna already excluded
+        // from the candidate list (the pre-fix, per-contact-query behavior).
+        let other_names_excluding_self = vec!["Justin".to_string()];
+        let expected = compute_focus(&messages, &other_names_excluding_self);
+
+        assert_eq!(with_exclusion.focus_other_pct, expected.focus_other_pct);
+        assert_eq!(with_exclusion.focus_me_pct, expected.focus_me_pct);
+        assert_eq!(with_exclusion.focus_them_pct, expected.focus_them_pct);
+
+        // Sanity: without self-exclusion, "Anna" mention would have counted
+        // too, producing a strictly larger other-bucket.
+        let without_exclusion = compute_focus_shared(&messages, shared_re.as_ref(), None);
+        assert!(without_exclusion.focus_other_pct > with_exclusion.focus_other_pct);
+    }
+
+    #[test]
+    fn shared_regex_self_exclusion_is_case_insensitive() {
+        // "I" guarantees a non-zero total so `focus_other_pct == 0.0` proves
+        // the ANNA/anna hit was actually excluded, not just an empty result.
+        let messages = vec![am(1, Participant::Me, "I think ANNA is the best")];
+        let names = vec!["Anna".to_string()];
+        let shared_re = build_other_names_regex(&names);
+        let out = compute_focus_shared(&messages, shared_re.as_ref(), Some("anna"));
+        assert_eq!(out.focus_other_pct, 0.0);
+        assert_eq!(out.focus_me_pct, 1.0);
     }
 }

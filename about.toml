@@ -1,0 +1,61 @@
+# Configuration for `cargo about` (https://github.com/EmbarkStudios/cargo-about).
+#
+# Used to audit the license of every crate in the workspace's dependency tree
+# and to regenerate the third-party license inventory referenced from
+# THIRD_PARTY_NOTICES. See docs/RELEASE.md for the exact commands.
+#
+#   cargo install cargo-about
+#   cargo about generate --workspace --format json -o third-party-licenses.json
+#
+# `cargo about generate` (with no --format) also doubles as a license-policy
+# gate: it errors out if any crate resolves to a license not in `accepted`.
+
+# SPDX license identifiers that are considered acceptable for a dependency to
+# use. Covers the license types actually observed across this workspace's
+# dependency tree plus the common permissive licenses used across the wider
+# Rust ecosystem.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "MPL-2.0",
+    "CC0-1.0",
+]
+
+# Target triples this build ships for (keep in sync with the release.yml
+# build matrix) so platform-conditional dependencies are all accounted for.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+]
+
+# Dev/build-only dependencies never end up in the shipped binary, so an
+# unreviewed license on one of them shouldn't block a release.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# Crate names with license metadata that `cargo about` cannot auto-detect
+# (e.g. missing/nonstandard LICENSE files) get built-in workarounds upstream.
+# None have been required for this workspace so far; add crate names here if
+# `cargo about generate` reports one as unclear.
+workarounds = []
+
+# Per-crate overrides/clarifications go here if a specific dependency needs
+# one (uncomment and adjust if `cargo about generate` ever flags a crate as
+# unclear/missing):
+#
+# [some-crate]
+# accepted = ["OpenSSL"]
+#
+# [some-crate.clarify]
+# license = "ISC AND MIT AND OpenSSL"
+#
+# [[some-crate.clarify.files]]
+# path = "LICENSE"
+# license = "OpenSSL"
+# checksum = "..."

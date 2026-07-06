@@ -448,71 +448,6 @@ enum Commands {
         #[arg(short, long)]
         input: PathBuf,
     },
-    /// Build a Tantivy index from the database
-    #[cfg(feature = "tantivy")]
-    TantivyBuild {
-        /// Path to database
-        #[arg(short, long)]
-        db: PathBuf,
-
-        /// Index directory
-        #[arg(short, long, default_value = "tantivy-index")]
-        index_dir: PathBuf,
-
-        /// Rebuild the index directory
-        #[arg(long, default_value_t = true)]
-        rebuild: bool,
-    },
-    /// Update Tantivy index with new rows
-    #[cfg(feature = "tantivy")]
-    TantivyUpdate {
-        /// Path to database
-        #[arg(short, long)]
-        db: PathBuf,
-
-        /// Index directory
-        #[arg(short, long, default_value = "tantivy-index")]
-        index_dir: PathBuf,
-    },
-    /// Search Tantivy index
-    #[cfg(feature = "tantivy")]
-    TantivySearch {
-        /// Index directory
-        #[arg(short, long, default_value = "tantivy-index")]
-        index_dir: PathBuf,
-
-        /// Query string
-        #[arg(short, long)]
-        query: String,
-
-        /// Result limit
-        #[arg(long, default_value_t = 50)]
-        limit: usize,
-
-        /// Output JSON lines
-        #[arg(long, default_value_t = false)]
-        json: bool,
-
-        /// Filter by address (normalized)
-        #[arg(long)]
-        address: Option<String>,
-
-        /// Filter by thread id
-        #[arg(long)]
-        thread_id: Option<String>,
-
-        /// Filter by message type
-        #[arg(long, value_enum)]
-        message_type: Option<ExportMessageType>,
-
-        /// Filter by timestamp >= (ms since epoch)
-        #[arg(long)]
-        since: Option<i64>,
-
-        /// Filter by timestamp <= (ms since epoch)
-        #[arg(long)]
-        until: Option<i64>,
-    },
     /// Generate test data
     Datagen {
         /// Output path
@@ -1208,52 +1143,6 @@ fn main() -> Result<()> {
             println!("  naive:  {} boundaries in {} ms", naive.len(), naive_ms);
             println!("  memchr: {} boundaries in {} ms", memchr.len(), memchr_ms);
             println!("  full:   {} boundaries in {} ms", full.len(), full_ms);
-            Ok(())
-        }
-        #[cfg(feature = "tantivy")]
-        Commands::TantivyBuild {
-            db,
-            index_dir,
-            rebuild,
-        } => {
-            sms_search::TantivyBackend::build_index(&db, &index_dir, rebuild)?;
-            println!("Tantivy index built at {}", index_dir.display());
-            Ok(())
-        }
-        #[cfg(feature = "tantivy")]
-        Commands::TantivyUpdate { db, index_dir } => {
-            sms_search::TantivyBackend::update_index(&db, &index_dir)?;
-            println!("Tantivy index updated at {}", index_dir.display());
-            Ok(())
-        }
-        #[cfg(feature = "tantivy")]
-        Commands::TantivySearch {
-            index_dir,
-            query,
-            limit,
-            json,
-            address,
-            thread_id,
-            message_type,
-            since,
-            until,
-        } => {
-            let backend = sms_search::TantivyBackend::open(&index_dir)?;
-            let filter = sms_search::TantivyFilter {
-                address: address.map(|a| normalize_address(&a)),
-                thread_id,
-                message_type: message_type.map(|t| message_type_to_i32(t) as i64),
-                since,
-                until,
-            };
-            let results = backend.search_filtered(&query, limit, &filter)?;
-            for msg in results {
-                if json {
-                    println!("{}", serde_json::to_string(&msg)?);
-                } else {
-                    println!("{} | {} | {}", msg.timestamp, msg.address, msg.body);
-                }
-            }
             Ok(())
         }
         Commands::Datagen {
@@ -2071,138 +1960,127 @@ fn export_messages(
     match format {
         ExportFormat::Jsonl => {
             let mut writer = BufWriter::new(writer);
-            if let Some(q) = query {
-                let mut stmt = conn.prepare(&fts_sql)?;
-                let iter = stmt.query_map(
-                    named_params! {
-                        ":q": sms_search::sanitize_fts5_query(q),
-                        ":since": since,
-                        ":until": until,
-                        ":address": address,
-                        ":address_like": address_like,
-                        ":body_contains": body_contains,
-                        ":thread_id": thread_id,
-                        ":message_type": message_type,
-                        ":limit": limit as i64,
-                        ":offset": offset as i64
-                    },
-                    |row| {
-                        Ok(ExportRow {
-                            id: row.get::<_, String>(0)?,
-                            message_id: row.get(1)?,
-                            timestamp: row.get(2)?,
-                            address: row.get(3)?,
-                            body: row.get(4)?,
-                            message_type: message_type_to_str(row.get::<_, i32>(5)?).to_string(),
-                            thread_id: row.get(6)?,
-                            attachment_count: row.get(7)?,
-                            attachment_paths: row.get(8)?,
-                        })
-                    },
-                )?;
-                for row in iter {
-                    writeln!(writer, "{}", serde_json::to_string(&row?)?)?;
-                }
-            } else {
-                let mut stmt = conn.prepare(&plain_sql)?;
-                let iter = stmt.query_map(
-                    named_params! {
-                        ":since": since,
-                        ":until": until,
-                        ":address": address,
-                        ":address_like": address_like,
-                        ":body_contains": body_contains,
-                        ":thread_id": thread_id,
-                        ":message_type": message_type,
-                        ":limit": limit as i64,
-                        ":offset": offset as i64
-                    },
-                    |row| {
-                        Ok(ExportRow {
-                            id: row.get::<_, String>(0)?,
-                            message_id: row.get(1)?,
-                            timestamp: row.get(2)?,
-                            address: row.get(3)?,
-                            body: row.get(4)?,
-                            message_type: message_type_to_str(row.get::<_, i32>(5)?).to_string(),
-                            thread_id: row.get(6)?,
-                            attachment_count: row.get(7)?,
-                            attachment_paths: row.get(8)?,
-                        })
-                    },
-                )?;
-                for row in iter {
-                    writeln!(writer, "{}", serde_json::to_string(&row?)?)?;
-                }
-            }
+            export_message_rows(
+                conn,
+                &fts_sql,
+                &plain_sql,
+                query,
+                since,
+                until,
+                address,
+                address_like,
+                body_contains,
+                thread_id,
+                message_type,
+                limit,
+                offset,
+                |row| {
+                    writeln!(writer, "{}", serde_json::to_string(&row)?)?;
+                    Ok(())
+                },
+            )?;
         }
         ExportFormat::Csv => {
             let mut csv = csv::WriterBuilder::new().from_writer(BufWriter::new(writer));
-            if let Some(q) = query {
-                let mut stmt = conn.prepare(&fts_sql)?;
-                let iter = stmt.query_map(
-                    named_params! {
-                        ":q": sms_search::sanitize_fts5_query(q),
-                        ":since": since,
-                        ":until": until,
-                        ":address": address,
-                        ":address_like": address_like,
-                        ":body_contains": body_contains,
-                        ":thread_id": thread_id,
-                        ":message_type": message_type,
-                        ":limit": limit as i64,
-                        ":offset": offset as i64
-                    },
-                    |row| {
-                        Ok(ExportRow {
-                            id: row.get::<_, String>(0)?,
-                            message_id: row.get(1)?,
-                            timestamp: row.get(2)?,
-                            address: row.get(3)?,
-                            body: row.get(4)?,
-                            message_type: message_type_to_str(row.get::<_, i32>(5)?).to_string(),
-                            thread_id: row.get(6)?,
-                            attachment_count: row.get(7)?,
-                            attachment_paths: row.get(8)?,
-                        })
-                    },
-                )?;
-                for row in iter {
-                    csv.serialize(row?)?;
-                }
-            } else {
-                let mut stmt = conn.prepare(&plain_sql)?;
-                let iter = stmt.query_map(
-                    named_params! {
-                        ":since": since,
-                        ":until": until,
-                        ":address": address,
-                        ":address_like": address_like,
-                        ":body_contains": body_contains,
-                        ":thread_id": thread_id,
-                        ":message_type": message_type,
-                        ":limit": limit as i64,
-                        ":offset": offset as i64
-                    },
-                    |row| {
-                        Ok(ExportRow {
-                            id: row.get::<_, String>(0)?,
-                            message_id: row.get(1)?,
-                            timestamp: row.get(2)?,
-                            address: row.get(3)?,
-                            body: row.get(4)?,
-                            message_type: message_type_to_str(row.get::<_, i32>(5)?).to_string(),
-                            thread_id: row.get(6)?,
-                            attachment_count: row.get(7)?,
-                            attachment_paths: row.get(8)?,
-                        })
-                    },
-                )?;
-                for row in iter {
-                    csv.serialize(row?)?;
-                }
-            }
+            export_message_rows(
+                conn,
+                &fts_sql,
+                &plain_sql,
+                query,
+                since,
+                until,
+                address,
+                address_like,
+                body_contains,
+                thread_id,
+                message_type,
+                limit,
+                offset,
+                |row| {
+                    csv.serialize(row)?;
+                    Ok(())
+                },
+            )?;
             csv.flush()?;
+        }
+    }
+    Ok(())
+}
+
+/// Map one FTS5/plain query row into an [`ExportRow`]. Shared by every
+/// jsonl/csv x query/no-query export path so the column list only lives once.
+fn export_row_from_query(row: &rusqlite::Row) -> rusqlite::Result<ExportRow> {
+    Ok(ExportRow {
+        id: row.get::<_, String>(0)?,
+        message_id: row.get(1)?,
+        timestamp: row.get(2)?,
+        address: row.get(3)?,
+        body: row.get(4)?,
+        message_type: message_type_to_str(row.get::<_, i32>(5)?).to_string(),
+        thread_id: row.get(6)?,
+        attachment_count: row.get(7)?,
+        attachment_paths: row.get(8)?,
+    })
+}
+
+/// Run the export query (FTS5 when `query` is set, plain scan otherwise) and
+/// invoke `on_row` for each mapped [`ExportRow`] in result order. This is the
+/// single place that streams rows to either the jsonl or the csv writer.
+#[allow(clippy::too_many_arguments)]
+fn export_message_rows(
+    conn: &rusqlite::Connection,
+    fts_sql: &str,
+    plain_sql: &str,
+    query: Option<&str>,
+    since: Option<i64>,
+    until: Option<i64>,
+    address: Option<&str>,
+    address_like: Option<&str>,
+    body_contains: Option<&str>,
+    thread_id: Option<&str>,
+    message_type: Option<i32>,
+    limit: usize,
+    offset: usize,
+    mut on_row: impl FnMut(ExportRow) -> Result<()>,
+) -> Result<()> {
+    if let Some(q) = query {
+        let mut stmt = conn.prepare(fts_sql)?;
+        let iter = stmt.query_map(
+            named_params! {
+                ":q": sms_search::sanitize_fts5_query(q),
+                ":since": since,
+                ":until": until,
+                ":address": address,
+                ":address_like": address_like,
+                ":body_contains": body_contains,
+                ":thread_id": thread_id,
+                ":message_type": message_type,
+                ":limit": limit as i64,
+                ":offset": offset as i64
+            },
+            export_row_from_query,
+        )?;
+        for row in iter {
+            on_row(row?)?;
+        }
+    } else {
+        let mut stmt = conn.prepare(plain_sql)?;
+        let iter = stmt.query_map(
+            named_params! {
+                ":since": since,
+                ":until": until,
+                ":address": address,
+                ":address_like": address_like,
+                ":body_contains": body_contains,
+                ":thread_id": thread_id,
+                ":message_type": message_type,
+                ":limit": limit as i64,
+                ":offset": offset as i64
+            },
+            export_row_from_query,
+        )?;
+        for row in iter {
+            on_row(row?)?;
         }
     }
     Ok(())

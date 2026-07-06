@@ -50,15 +50,30 @@ pip install -r requirements.txt
 python scripts/setup_ml_models.py
 ```
 
-This exports the CLIP ViT-L/14 visual encoder and the NSFW classifier MLP to `ml/`. It only needs to run once; subsequent runs are skipped if the files already exist.
+This produces every model file `config/app_global_settings.json` points at by default:
+
+- **`ml/CLIP1/`** — the CLIP ViT-L/14 vision encoder, text encoder, and tokenizer
+  (`vision_model_fp16.onnx`, `text_model_fp16.onnx`, `tokenizer.json`, plus
+  supporting config files), downloaded pre-converted from the
+  [`Xenova/clip-vit-large-patch14`](https://huggingface.co/Xenova/clip-vit-large-patch14)
+  Transformers.js ONNX export on Hugging Face. This is a one-time download,
+  not a local export — the split vision/text ONNX graphs aren't something
+  `open_clip`/`torch.onnx.export` reproduce.
+- **`ml/nsfw_classifier.onnx`** — the fallback NSFW model (a small MLP head
+  over CLIP embeddings, from LAION's CLIP-based detector), exported locally
+  from the AutoKeras SavedModel bundle in `ml/clip_autokeras_binary_nsfw/`.
+
+It only needs to run once; subsequent runs skip any file that already exists.
+Downloaded CLIP1 files are checksum-verified against pinned SHA256 hashes in
+`scripts/setup_ml_models.py` (see `EXPECTED_SHA256`); see
+[`docs/PRIVACY.md`](docs/PRIVACY.md) for details.
 
 > For GPU inference install `onnxruntime-gpu` instead of `onnxruntime` and ensure CUDA is available.
 
 #### Optional: higher-accuracy NSFW classifier
 
-The default NSFW model is a small head over CLIP embeddings
-(`ml/nsfw_classifier.onnx`, from LAION's CLIP-based detector). For better
-accuracy, export the Marqo image-input classifier (~21 MB, scores frames
+`ml/nsfw_classifier.onnx` (above) is only the fallback. For better accuracy,
+export the **preferred** Marqo image-input classifier (~21 MB, scores frames
 directly instead of embeddings):
 
 ```powershell
@@ -162,24 +177,6 @@ cargo run --bin sms -- export-attachments --db sms.db --format csv --output atta
 
 Additional filters: `--mime`, `--since`, `--address`, `--thread-id`, `--message-type`, `--address-like`, `--body-contains`
 
-### Tantivy Index (Optional, currently broken)
-
-> **Status:** the Tantivy backend does not currently compile against the pinned
-> `tantivy 0.22` (the code targets an older API). The `tantivy-*` subcommands are
-> hidden unless the feature is enabled. FTS5 is the primary, fully supported
-> search backend; treat the commands below as aspirational until the backend is
-> fixed or removed.
-
-For high-performance full-text search using Tantivy (in addition to FTS5):
-
-```powershell
-cargo run --bin sms --features tantivy -- tantivy-build --db sms.db --index-dir tantivy-index --rebuild
-cargo run --bin sms --features tantivy -- tantivy-update --db sms.db --index-dir tantivy-index
-cargo run --bin sms --features tantivy -- tantivy-search --index-dir tantivy-index --query "hello" --limit 20
-```
-
-Additional filters: `--address`, `--thread-id`, `--message-type`, `--since`
-
 ### Synthetic Data Generation
 
 Generate a synthetic SMS XML for testing and benchmarking:
@@ -259,9 +256,10 @@ config/
   app_ui_settings.json            # Personal runtime state (gitignored)
   app_ui_settings.example.json    # Template for app_ui_settings.json
 
-ml/                               # Generated ONNX models (gitignored, see setup)
+ml/                               # Downloaded/generated ONNX models (gitignored, see setup; see ml/README.md)
 scripts/
-  setup_ml_models.py              # Exports CLIP + NSFW models to ONNX
+  setup_ml_models.py              # Downloads CLIP1 bundle + exports fallback NSFW model to ONNX
+  setup_marqo_nsfw.py             # Exports the preferred Marqo NSFW model to ONNX
 docs/                             # Architecture, benchmarks, privacy notes
 ```
 

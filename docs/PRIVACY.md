@@ -13,6 +13,15 @@ SMS Archive Manager operates fully locally. Your SMS/MMS data stays on your mach
 
 ## Model Downloads
 - If ML models are downloaded, verify checksum/signature before use.
+  `scripts/setup_ml_models.py` downloads the CLIP1 bundle (vision/text
+  encoders + tokenizer) from Hugging Face and checks each file's SHA256
+  against `EXPECTED_SHA256` in that script. Those hashes are placeholders
+  until a maintainer runs the script with network access once and pins the
+  printed values (see the `EXPECTED_SHA256` TODO in the script) — until
+  pinned, downloads are still fetched and hashed, but integrity is not yet
+  enforced against a known-good value. `ml/nsfw_classifier.onnx` is built
+  locally (not downloaded) from an already-on-disk AutoKeras bundle, so no
+  network-transport checksum applies to it.
 - Provide an offline mode that never downloads assets.
 
 ## Data Deletion

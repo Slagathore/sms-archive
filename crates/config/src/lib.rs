@@ -115,8 +115,36 @@ pub fn available_disk_bytes(path: &Path) -> Result<u64> {
     fs2::available_space(path).map_err(AppError::Io)
 }
 
+/// Delete rotated daily log files (`sms-archive.log.YYYY-MM-DD`) beyond the
+/// most recent `keep`. tracing-appender's daily rotation never prunes on its
+/// own, so logs accumulated to hundreds of MB. Date suffixes sort
+/// lexicographically, so keeping the lexically-largest `keep` keeps the newest.
+fn prune_old_logs(log_dir: &Path, prefix: &str, keep: usize) {
+    let Ok(entries) = std::fs::read_dir(log_dir) else {
+        return;
+    };
+    let mut logs: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with(prefix) && n.len() > prefix.len())
+        })
+        .collect();
+    if logs.len() <= keep {
+        return;
+    }
+    logs.sort();
+    let remove_count = logs.len() - keep;
+    for path in logs.into_iter().take(remove_count) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 pub fn init_logging(log_dir: &Path) -> Result<WorkerGuard> {
     std::fs::create_dir_all(log_dir)?;
+    prune_old_logs(log_dir, "sms-archive.log.", 7);
     let file_appender = tracing_appender::rolling::daily(log_dir, "sms-archive.log");
     let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
 

@@ -1,5 +1,27 @@
 name: Release
 
+# Required repository secrets (all optional — steps below skip cleanly,
+# producing an unsigned/unnotarized build, when the relevant secret is unset):
+#
+#   Windows Authenticode code signing (used by the "Sign (Windows)" step):
+#     WINDOWS_CERT_BASE64      - base64-encoded .pfx code-signing certificate
+#                                 (e.g. `[Convert]::ToBase64String((Get-Content cert.pfx -AsByteStream -Raw))`)
+#     WINDOWS_CERT_PASSWORD    - password protecting the .pfx
+#
+#   macOS signing + notarization (used by the "Notarize (macOS)" step):
+#     APPLE_CERT_BASE64        - base64-encoded Developer ID Application .p12 certificate
+#     APPLE_CERT_PASSWORD      - password protecting the .p12
+#     APPLE_SIGNING_IDENTITY   - codesign identity, e.g.
+#                                 "Developer ID Application: Jane Doe (TEAMID1234)"
+#     APPLE_ID                 - Apple ID email used to authenticate with notarytool
+#     APPLE_ID_PASSWORD        - app-specific password for that Apple ID
+#                                 (https://support.apple.com/en-us/102654)
+#     APPLE_TEAM_ID            - Apple Developer Team ID
+#
+# None of these are required to build and package a release; the workflow
+# always produces an artifact, just unsigned/unnotarized when secrets are
+# absent.
+
 on:
   push:
     tags:
@@ -33,13 +55,130 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist
           Copy-Item -Force target/${{ matrix.target }}/release/${{ matrix.bin }} dist/
-          # TODO: copy native libs (onnx/ffmpeg/libheif) into dist/libs/${{ matrix.target }}
+
+      - name: Bundle native libraries
+        shell: pwsh
+        run: |
+          # The `ort` crate (ONNX Runtime bindings) downloads a prebuilt
+          # onnxruntime shared library at build time and drops it somewhere
+          # under target/; the exact subdirectory varies by ort/onnxruntime
+          # version and platform, so we search for it recursively rather
+          # than hardcode a path. It must sit next to the executable for the
+          # OS loader to find it at runtime, so it's copied into dist/
+          # directly (not a libs/ subfolder).
+          $libPattern = switch ("${{ matrix.os }}") {
+            "windows-latest" { "onnxruntime.dll" }
+            "macos-latest"   { "libonnxruntime*.dylib" }
+            default          { "libonnxruntime*.so*" }
+          }
+
+          $lib = Get-ChildItem -Path target -Recurse -Filter $libPattern -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -ne $lib) {
+            Copy-Item -Force $lib.FullName (Join-Path "dist" $lib.Name)
+            Write-Host "Bundled native library: $($lib.FullName) -> dist/$($lib.Name)"
+          } else {
+            Write-Warning "Could not locate '$libPattern' under target/. The packaged binary may fail to start on a machine without ONNX Runtime installed."
+          }
+
+          # ffmpeg, tesseract, and libheif are deliberately NOT bundled:
+          # the app shells out to system `ffmpeg`/`tesseract` executables at
+          # runtime, and libheif is an optional system library. All three
+          # are large and/or separately licensed (see THIRD_PARTY_NOTICES).
+          # Users are expected to install them and have them on PATH; we
+          # just log whether the CI runner happens to have them, purely
+          # informationally.
+          foreach ($tool in @("ffmpeg", "tesseract")) {
+            $found = Get-Command $tool -ErrorAction SilentlyContinue
+            if ($found) {
+              Write-Host "(info) $tool is on this runner's PATH at $($found.Source) - NOT bundled; target machines must install it separately."
+            }
+          }
+
+      - name: Include licenses and third-party notices
+        shell: pwsh
+        run: |
+          Copy-Item -Force LICENSE-MIT dist/
+          Copy-Item -Force LICENSE-APACHE dist/
+          Copy-Item -Force THIRD_PARTY_NOTICES dist/
+
       - name: Sign (Windows)
-        if: matrix.os == 'windows-latest'
-        run: echo "TODO: configure code signing"
+        if: ${{ matrix.os == 'windows-latest' && secrets.WINDOWS_CERT_BASE64 != '' }}
+        shell: pwsh
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "sms-archive-codesign.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
+
+          $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -like "*x64*" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+
+          if (-not $signtool) {
+            throw "signtool.exe not found under Windows Kits; cannot sign."
+          }
+
+          & $signtool sign /f $certPath /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 (Join-Path "dist" "${{ matrix.bin }}")
+          if ($LASTEXITCODE -ne 0) {
+            throw "signtool sign failed with exit code $LASTEXITCODE"
+          }
+
+          & $signtool verify /pa (Join-Path "dist" "${{ matrix.bin }}")
+
+          Remove-Item -Force $certPath
+      - name: Sign (Windows) - skipped
+        if: ${{ matrix.os == 'windows-latest' && secrets.WINDOWS_CERT_BASE64 == '' }}
+        shell: pwsh
+        run: Write-Host "WINDOWS_CERT_BASE64 secret is not set - shipping this build UNSIGNED."
+
       - name: Notarize (macOS)
-        if: matrix.os == 'macos-latest'
-        run: echo "TODO: configure notarization"
+        if: ${{ matrix.os == 'macos-latest' && secrets.APPLE_ID != '' }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_CERT_BASE64: ${{ secrets.APPLE_CERT_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/sms-archive-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "$APPLE_CERT_BASE64" | base64 --decode > "$RUNNER_TEMP/sms-archive-cert.p12"
+          security import "$RUNNER_TEMP/sms-archive-cert.p12" -k "$KEYCHAIN_PATH" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "dist/${{ matrix.bin }}"
+          codesign --verify --verbose "dist/${{ matrix.bin }}"
+
+          ditto -c -k --keepParent "dist/${{ matrix.bin }}" "$RUNNER_TEMP/sms-archive-notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/sms-archive-notarize.zip" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+          # Stapling a bare executable (not a .app/.pkg/.dmg) isn't supported
+          # by `stapler`; Gatekeeper re-checks with Apple online instead,
+          # which is fine as long as notarization above succeeded. Staple
+          # here anyway in case this step is later pointed at a .app bundle.
+          xcrun stapler staple "dist/${{ matrix.bin }}" || echo "Stapling skipped (not a stapleable bundle type); online notarization check still applies."
+
+          rm -f "$RUNNER_TEMP/sms-archive-cert.p12" "$RUNNER_TEMP/sms-archive-notarize.zip"
+          security delete-keychain "$KEYCHAIN_PATH"
+      - name: Notarize (macOS) - skipped
+        if: ${{ matrix.os == 'macos-latest' && secrets.APPLE_ID == '' }}
+        run: echo "APPLE_ID secret is not set - shipping this build UNNOTARIZED."
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:

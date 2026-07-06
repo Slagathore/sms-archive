@@ -8,11 +8,6 @@ license.workspace = true
 name = "sms"
 path = "src/main.rs"
 
-[features]
-# Enables the Tantivy search backend and its tantivy-* subcommands:
-#   cargo build --bin sms --features tantivy
-tantivy = ["sms-search/tantivy"]
-
 [dependencies]
 clap = { workspace = true }
 anyhow = { workspace = true }
