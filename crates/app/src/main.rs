@@ -227,6 +227,10 @@ struct SmsArchiveApp {
     assistant_input: String,
     assistant_waiting: bool,
     pending_assistant: Arc<Mutex<Option<Result<Vec<sms_assistant::ChatMessage>>>>>,
+    /// Live-streaming assistant answer, appended by the worker as tokens arrive.
+    assistant_stream: Arc<Mutex<String>>,
+    /// Set by the "Stop" button to abort an in-flight assistant response.
+    assistant_cancel: Arc<AtomicBool>,
     map_filters: MapFilters,
     map_points: Vec<MapPoint>,
     map_in_flight: bool,
@@ -546,6 +550,8 @@ impl Default for SmsArchiveApp {
             assistant_input: String::new(),
             assistant_waiting: false,
             pending_assistant: Arc::new(Mutex::new(None)),
+            assistant_stream: Arc::new(Mutex::new(String::new())),
+            assistant_cancel: Arc::new(AtomicBool::new(false)),
             map_filters: MapFilters::default(),
             map_points: Vec::new(),
             map_in_flight: false,
@@ -1225,6 +1231,9 @@ impl eframe::App for SmsArchiveApp {
         }
         if let Some(result) = self.take_pending_assistant() {
             self.assistant_waiting = false;
+            if let Ok(mut buf) = self.assistant_stream.lock() {
+                buf.clear();
+            }
             match result {
                 Ok(messages) => {
                     self.assistant.messages = messages;
@@ -1233,6 +1242,10 @@ impl eframe::App for SmsArchiveApp {
                     self.status = format!("Assistant error: {}", err);
                 }
             }
+        }
+        // Keep repainting while a streamed answer is arriving so tokens render.
+        if self.assistant_waiting {
+            ctx.request_repaint();
         }
 
         if self
@@ -4431,6 +4444,29 @@ impl eframe::App for SmsArchiveApp {
                                         ui.label(&msg.content);
                                     });
                                 }
+                                // Live-streaming answer for the in-flight turn.
+                                if self.assistant_waiting {
+                                    let live = self
+                                        .assistant_stream
+                                        .lock()
+                                        .ok()
+                                        .map(|b| b.clone())
+                                        .unwrap_or_default();
+                                    ui.group(|ui| {
+                                        ui.colored_label(
+                                            egui::Color32::DARK_GREEN,
+                                            "Assistant:",
+                                        );
+                                        if live.is_empty() {
+                                            ui.horizontal(|ui| {
+                                                ui.add(egui::Spinner::new());
+                                                ui.label("Thinking…");
+                                            });
+                                        } else {
+                                            ui.label(&live);
+                                        }
+                                    });
+                                }
                             });
                         ui.separator();
                         ui.horizontal(|ui| {
@@ -4452,10 +4488,12 @@ impl eframe::App for SmsArchiveApp {
                             if ui.button("Clear").clicked() {
                                 self.assistant.clear_history();
                             }
+                            if self.assistant_waiting
+                                && ui.button("⏹ Stop").clicked()
+                            {
+                                self.assistant_cancel.store(true, Ordering::Relaxed);
+                            }
                         });
-                        if self.assistant_waiting {
-                            ui.label("Waiting for response...");
-                        }
                     });
             }
 
@@ -6235,12 +6273,22 @@ impl SmsArchiveApp {
             .messages
             .push(sms_assistant::ChatMessage::new("user", user_msg));
         self.assistant_waiting = true;
+        self.assistant_cancel.store(false, Ordering::Relaxed);
+        if let Ok(mut buf) = self.assistant_stream.lock() {
+            buf.clear();
+        }
         let pending = Arc::clone(&self.pending_assistant);
+        let stream = Arc::clone(&self.assistant_stream);
+        let cancel = Arc::clone(&self.assistant_cancel);
         let messages = self.assistant.messages.clone();
         let assistant = self.assistant.clone();
         let db_path = self.db_path.clone();
         std::thread::spawn(move || {
-            let result = assistant.complete_chat(messages, &db_path);
+            let result = assistant.complete_chat_streaming(messages, &db_path, &cancel, |delta| {
+                if let Ok(mut buf) = stream.lock() {
+                    buf.push_str(delta);
+                }
+            });
             if let Ok(mut lock) = pending.lock() {
                 *lock = Some(result);
             }

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -59,6 +60,75 @@ fn send_ollama_chat_raw(
     let response = http_agent().post(&url).send_json(&body)?;
     let json: Value = response.into_json()?;
     Ok(json)
+}
+
+/// Result of a streamed chat turn: the full accumulated content plus any
+/// tool calls the model requested (tool calls arrive in the final chunk).
+pub struct StreamOutcome {
+    pub content: String,
+    pub tool_calls: Vec<Value>,
+}
+
+/// Stream a chat completion, invoking `on_delta` for each content chunk as it
+/// arrives (so the UI can render tokens live) and checking `cancel` between
+/// chunks so a "Stop" button aborts promptly. Returns the accumulated content
+/// and any tool calls seen.
+pub fn stream_ollama_chat(
+    messages: &[ChatMessage],
+    ollama_url: &str,
+    model: &str,
+    tools: Option<&[Value]>,
+    cancel: &AtomicBool,
+    mut on_delta: impl FnMut(&str),
+) -> Result<StreamOutcome> {
+    use std::io::BufRead;
+    let url = format!("{}/api/chat", ollama_url.trim_end_matches('/'));
+    let mut body = json!({
+        "model": model,
+        "messages": messages
+            .iter()
+            .map(|m| json!({ "role": m.role, "content": m.content }))
+            .collect::<Vec<_>>(),
+        "stream": true,
+    });
+    if let Some(tools) = tools {
+        body["tools"] = json!(tools);
+    }
+    let response = http_agent().post(&url).send_json(&body)?;
+    let reader = std::io::BufReader::new(response.into_reader());
+    let mut content = String::new();
+    let mut tool_calls: Vec<Value> = Vec::new();
+    for line in reader.lines() {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let Ok(line) = line else { break };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+            continue;
+        };
+        if let Some(msg) = value.get("message") {
+            if let Some(delta) = msg.get("content").and_then(|c| c.as_str()) {
+                if !delta.is_empty() {
+                    content.push_str(delta);
+                    on_delta(delta);
+                }
+            }
+            if let Some(calls) = msg.get("tool_calls").and_then(|c| c.as_array()) {
+                tool_calls.extend(calls.iter().cloned());
+            }
+        }
+        if value.get("done").and_then(|d| d.as_bool()).unwrap_or(false) {
+            break;
+        }
+    }
+    Ok(StreamOutcome {
+        content,
+        tool_calls,
+    })
 }
 
 pub fn extract_message_content(response: &Value) -> Result<String> {

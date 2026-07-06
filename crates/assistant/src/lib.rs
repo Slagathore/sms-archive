@@ -69,6 +69,63 @@ impl Assistant {
         Ok(messages)
     }
 
+    /// Like [`Self::complete_chat`], but streams the answer: `on_delta` is
+    /// invoked for each content chunk as it arrives, and `cancel` is honored
+    /// between chunks and tool rounds. Tool turns still run to completion so
+    /// the model can search the archive before answering.
+    pub fn complete_chat_streaming(
+        &self,
+        mut messages: Vec<ChatMessage>,
+        db_path: &str,
+        cancel: &std::sync::atomic::AtomicBool,
+        mut on_delta: impl FnMut(&str),
+    ) -> Result<Vec<ChatMessage>> {
+        use std::sync::atomic::Ordering;
+        const MAX_TOOL_ROUNDS: usize = 5;
+
+        for _ in 0..MAX_TOOL_ROUNDS {
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(messages);
+            }
+            let outcome = ollama::stream_ollama_chat(
+                &messages,
+                &self.ollama_url,
+                &self.model,
+                Some(&tools::get_assistant_tools()),
+                cancel,
+                &mut on_delta,
+            )?;
+            if outcome.tool_calls.is_empty() {
+                messages.push(ChatMessage::new("assistant", outcome.content));
+                return Ok(messages);
+            }
+            for call in &outcome.tool_calls {
+                let (tool_name, args) = parse_tool_call(call)?;
+                let tool_result = match tools::execute_tool(db_path, &tool_name, &args) {
+                    Ok(result) => result,
+                    Err(err) => format!("Tool error: {}", err),
+                };
+                messages.push(ChatMessage::new(
+                    "tool",
+                    format!("{}:\n{}", tool_name, tool_result.trim()),
+                ));
+            }
+        }
+
+        // Round cap hit — stream a final answer without tools so the user
+        // always gets text back.
+        let outcome = ollama::stream_ollama_chat(
+            &messages,
+            &self.ollama_url,
+            &self.model,
+            None,
+            cancel,
+            &mut on_delta,
+        )?;
+        messages.push(ChatMessage::new("assistant", outcome.content));
+        Ok(messages)
+    }
+
     pub fn get_messages(&self) -> &[ChatMessage] {
         &self.messages
     }
