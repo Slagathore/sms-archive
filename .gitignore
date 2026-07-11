@@ -25,6 +25,7 @@ __pycache__/
 
 # Claude AI local settings
 .claude/
+docs/fables-audit-7-4-26.md
 
 # OS files
 .DS_Store
