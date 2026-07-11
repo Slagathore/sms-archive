@@ -1,20 +1,17 @@
 # SMS Archive Manager
 
-High-performance Rust desktop application for ingesting, indexing, searching, and analyzing large SMS/MMS XML exports (Android Backup & Restore / SMS Backup & Restore format).
+Rust desktop app for loading, indexing, searching, and analyzing large SMS/MMS XML exports (the Android Backup & Restore / SMS Backup & Restore format). It handles exports that are too big to open in anything else, and everything runs locally.
 
-## Features
+## What it does
 
-- **Streaming XML ingest** — processes multi-GB XML exports without loading the entire file into memory
-- **SQLite + FTS5 search** — full-text search with Unicode normalization across all messages
-- **Media pipeline** — thumbnail generation, content hashing (exact-duplicate detection), EXIF extraction, video keyframe extraction
-- **Semantic search** — CLIP-based image and text embeddings for similarity search
-- **NSFW classification** — local ONNX-based classifier, no data leaves the machine
-- **AI assistant** — Ollama integration for on-device LLM chat over your archive
-- **GUI** — egui desktop app with search, timeline, media gallery, and import UI
-- **CLI** — scriptable interface for ingest, search, export, and data generation
-- **Privacy-first** — entirely local; no cloud, no telemetry
-
----
+- Streams the XML in, so a multi gigabyte export gets processed without loading the whole file into memory.
+- Stores messages in SQLite with an FTS5 full text index, with Unicode normalization across all messages.
+- Runs a media pipeline: thumbnails, content hashing for exact duplicate detection, EXIF extraction, and video keyframe extraction.
+- Does semantic search over images and text using CLIP embeddings.
+- Classifies NSFW media with a local ONNX model. No data leaves the machine.
+- Includes an Ollama assistant so you can chat with a local LLM over your archive.
+- Ships a GUI (egui: search, timeline, media gallery, import) and a CLI for ingest, search, export, and test data generation.
+- No cloud, no telemetry. It all runs on your machine.
 
 ## Prerequisites
 
@@ -23,14 +20,12 @@ High-performance Rust desktop application for ingesting, indexing, searching, an
 | [Rust](https://rustup.rs/)                                     | stable (see `rust-toolchain.toml`) | Install via rustup                            |
 | [Python](https://www.python.org/)                              | 3.10+                              | Only needed to generate ML models             |
 | [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) | 5.x                                | Optional; enables OCR on images               |
-| [FFmpeg](https://ffmpeg.org/download.html)                     | 7.x / 8.x                          | Video keyframes + HEIC/HEIF image decoding    |
+| [FFmpeg](https://ffmpeg.org/download.html)                     | 7.x / 8.x                          | Video keyframes plus HEIC/HEIF image decoding |
 | [libheif](https://github.com/strukturag/libheif)               | 1.x                                | Optional; native HEIC via the `heic` feature (ffmpeg fallback covers HEIC without it) |
 | CUDA Toolkit                                                   | 11.x / 12.x                        | Optional; enables GPU inference for CLIP/NSFW |
 
 > **Windows note:** Add `tesseract.exe`, `ffmpeg.exe`, and `libheif` DLLs to your `PATH`, or set the
 > `tesseract_cmd` key in `config/app_global_settings.json` to the full path.
-
----
 
 ## Setup
 
@@ -52,35 +47,35 @@ python scripts/setup_ml_models.py
 
 This produces every model file `config/app_global_settings.json` points at by default:
 
-- **`ml/CLIP1/`** — the CLIP ViT-L/14 vision encoder, text encoder, and tokenizer
+- **`ml/CLIP1/`** is the CLIP ViT-L/14 vision encoder, text encoder, and tokenizer
   (`vision_model_fp16.onnx`, `text_model_fp16.onnx`, `tokenizer.json`, plus
   supporting config files), downloaded pre-converted from the
   [`Xenova/clip-vit-large-patch14`](https://huggingface.co/Xenova/clip-vit-large-patch14)
-  Transformers.js ONNX export on Hugging Face. This is a one-time download,
-  not a local export — the split vision/text ONNX graphs aren't something
-  `open_clip`/`torch.onnx.export` reproduce.
-- **`ml/nsfw_classifier.onnx`** — the fallback NSFW model (a small MLP head
-  over CLIP embeddings, from LAION's CLIP-based detector), exported locally
+  Transformers.js ONNX export on Hugging Face. This is a single download,
+  not a local export. The split vision/text ONNX graphs aren't something
+  `open_clip`/`torch.onnx.export` reproduces.
+- **`ml/nsfw_classifier.onnx`** is the fallback NSFW model (a small MLP head
+  over CLIP embeddings, from LAION's CLIP based detector), exported locally
   from the AutoKeras SavedModel bundle in `ml/clip_autokeras_binary_nsfw/`.
 
-It only needs to run once; subsequent runs skip any file that already exists.
-Downloaded CLIP1 files are checksum-verified against pinned SHA256 hashes in
+It only needs to run once; later runs skip any file that already exists.
+Downloaded CLIP1 files are verified against pinned SHA256 checksums in
 `scripts/setup_ml_models.py` (see `EXPECTED_SHA256`); see
 [`docs/PRIVACY.md`](docs/PRIVACY.md) for details.
 
 > For GPU inference install `onnxruntime-gpu` instead of `onnxruntime` and ensure CUDA is available.
 
-#### Optional: higher-accuracy NSFW classifier
+#### Optional: more accurate NSFW classifier
 
 `ml/nsfw_classifier.onnx` (above) is only the fallback. For better accuracy,
-export the **preferred** Marqo image-input classifier (~21 MB, scores frames
+export the preferred Marqo image-input classifier (~21 MB, scores frames
 directly instead of embeddings):
 
 ```powershell
 python scripts/setup_marqo_nsfw.py
 ```
 
-This produces `ml/nsfw_marqo_384.onnx`; the app auto-detects the model kind
+This produces `ml/nsfw_marqo_384.onnx`; the app detects the model kind
 from its input shape, and autofill prefers the Marqo model when both exist.
 
 ### 3. Configure paths
@@ -107,11 +102,9 @@ Model paths default to `./ml/...` relative to the working directory and do not n
 cargo build --release
 ```
 
----
-
 ## CLI Usage
 
-All commands are run via the `sms` binary. Run from the repo root so relative config paths resolve correctly.
+All commands run via the `sms` binary. Run from the repo root so relative config paths resolve correctly.
 
 ```powershell
 cargo run --bin sms -- --help
@@ -149,7 +142,7 @@ cargo run --bin sms -- verify --db sms.db --summary sms.import_summary.json --re
 
 ### Search
 
-Full-text search over messages:
+Full text search over messages:
 
 ```powershell
 cargo run --bin sms -- search --db sms.db --query "hello world" --limit 20
@@ -191,8 +184,6 @@ cargo run --bin sms -- datagen --output test.xml --size 0.01
 | `--mms-ratio 0.1`  | Fraction of messages that are MMS |
 | `--burstiness 0.2` | Conversation burst factor         |
 
----
-
 ## GUI App
 
 ```powershell
@@ -201,13 +192,11 @@ cargo run --bin sms-archive --release
 
 The GUI provides:
 
-- **Search** tab — FTS5 full-text search with filters and thread context view
-- **Import** tab — visual ingest pipeline with progress, pause/resume, and checkpoint recovery
-- **Media** tab — gallery view with NSFW filter, semantic image search, keyframe viewer
-- **Timeline** tab — per-contact message timeline
-- **Assistant** tab — Ollama-backed LLM chat over the archive
-
----
+- **Search** tab: FTS5 full text search with filters and thread context view
+- **Import** tab: visual ingest pipeline with progress, pause/resume, and checkpoint recovery
+- **Media** tab: gallery view with NSFW filter, semantic image search, keyframe viewer
+- **Timeline** tab: per-contact message timeline
+- **Assistant** tab: Ollama-backed LLM chat over the archive
 
 ## Configuration
 
@@ -227,9 +216,7 @@ Shared settings committed to the repo. Paths are relative to the working directo
 
 ### `config/app_ui_settings.json`
 
-Personal runtime state (DB paths, UI preferences, import history). **Not committed** — copy from `app_ui_settings.example.json` to get started. This file is written back automatically by the GUI.
-
----
+Personal runtime state (DB paths, UI preferences, import history). This one is not committed; copy it from `app_ui_settings.example.json` to get started. The GUI writes it back automatically.
 
 ## Workspace Layout
 
@@ -263,15 +250,11 @@ scripts/
 docs/                             # Architecture, benchmarks, privacy notes
 ```
 
----
-
 ## Running Tests
 
 ```powershell
 cargo test --workspace
 ```
-
----
 
 ## License
 
