@@ -3,10 +3,15 @@ name: Release
 # Required repository secrets (all optional — steps below skip cleanly,
 # producing an unsigned/unnotarized build, when the relevant secret is unset):
 #
-#   Windows Authenticode code signing (used by the "Sign (Windows)" step):
-#     WINDOWS_CERT_BASE64      - base64-encoded .pfx code-signing certificate
-#                                 (e.g. `[Convert]::ToBase64String((Get-Content cert.pfx -AsByteStream -Raw))`)
-#     WINDOWS_CERT_PASSWORD    - password protecting the .pfx
+#   Windows Authenticode code signing via Azure Artifact Signing (formerly
+#   Trusted Signing; used by the "Sign (Windows)" step). Certificates are
+#   short-lived and never exportable, so there is no PFX to store — instead a
+#   service principal holding the "Artifact Signing Certificate Profile
+#   Signer" role on the Slagathores-Apps signing account authenticates the
+#   signing request:
+#     AZURE_TENANT_ID          - Azure AD tenant of the signing account
+#     AZURE_CLIENT_ID          - service principal (app registration) client ID
+#     AZURE_CLIENT_SECRET      - client secret for that service principal
 #
 #   macOS signing + notarization (used by the "Notarize (macOS)" step):
 #     APPLE_CERT_BASE64        - base64-encoded Developer ID Application .p12 certificate
@@ -26,6 +31,9 @@ on:
   push:
     tags:
       - "v*"
+  # Manual runs build (and, with secrets present, sign) the same artifacts
+  # without cutting a tag — useful for validating the pipeline.
+  workflow_dispatch:
 
 jobs:
   build:
@@ -46,7 +54,7 @@ jobs:
     # conditions, so surface secret presence as job-level env booleans
     # (env *can* read secrets) and gate the signing steps on those instead.
     env:
-      HAS_WINDOWS_CERT: ${{ secrets.WINDOWS_CERT_BASE64 != '' }}
+      HAS_AZURE_SIGNING: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' }}
       HAS_APPLE_ID: ${{ secrets.APPLE_ID != '' }}
     steps:
       - uses: actions/checkout@v4
@@ -107,37 +115,40 @@ jobs:
           Copy-Item -Force LICENSE-APACHE dist/
           Copy-Item -Force THIRD_PARTY_NOTICES dist/
 
+      # Signs dist/sms-archive.exe via Azure Artifact Signing (account
+      # Slagathores-Apps, profile "public"). Only .exe files are signed:
+      # dist/onnxruntime.dll is Microsoft's own already-signed redistributable,
+      # and each file signed costs one signature from the monthly quota.
       - name: Sign (Windows)
-        if: ${{ matrix.os == 'windows-latest' && env.HAS_WINDOWS_CERT == 'true' }}
+        if: ${{ matrix.os == 'windows-latest' && env.HAS_AZURE_SIGNING == 'true' }}
+        uses: azure/trusted-signing-action@v2.0.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: https://cus.codesigning.azure.net/
+          trusted-signing-account-name: Slagathores-Apps
+          certificate-profile-name: public
+          files-folder: ${{ github.workspace }}/dist
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Verify signature (Windows)
+        if: ${{ matrix.os == 'windows-latest' && env.HAS_AZURE_SIGNING == 'true' }}
         shell: pwsh
-        env:
-          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
-          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
-          $certPath = Join-Path $env:RUNNER_TEMP "sms-archive-codesign.pfx"
-          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
-
-          $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -like "*x64*" } |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1 -ExpandProperty FullName
-
-          if (-not $signtool) {
-            throw "signtool.exe not found under Windows Kits; cannot sign."
+          $sig = Get-AuthenticodeSignature (Join-Path "dist" "${{ matrix.bin }}")
+          $sig | Format-List Status, StatusMessage, @{ n = "Signer"; e = { $_.SignerCertificate.Subject } }
+          if ($sig.Status -ne "Valid") {
+            throw "Authenticode signature on ${{ matrix.bin }} is '$($sig.Status)', expected 'Valid'."
           }
 
-          & $signtool sign /f $certPath /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 (Join-Path "dist" "${{ matrix.bin }}")
-          if ($LASTEXITCODE -ne 0) {
-            throw "signtool sign failed with exit code $LASTEXITCODE"
-          }
-
-          & $signtool verify /pa (Join-Path "dist" "${{ matrix.bin }}")
-
-          Remove-Item -Force $certPath
       - name: Sign (Windows) - skipped
-        if: ${{ matrix.os == 'windows-latest' && env.HAS_WINDOWS_CERT != 'true' }}
+        if: ${{ matrix.os == 'windows-latest' && env.HAS_AZURE_SIGNING != 'true' }}
         shell: pwsh
-        run: Write-Host "WINDOWS_CERT_BASE64 secret is not set - shipping this build UNSIGNED."
+        run: Write-Host "AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET secrets are not all set - shipping this build UNSIGNED."
 
       - name: Notarize (macOS)
         if: ${{ matrix.os == 'macos-latest' && env.HAS_APPLE_ID == 'true' }}
