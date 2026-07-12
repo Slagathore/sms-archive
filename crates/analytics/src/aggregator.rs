@@ -359,7 +359,7 @@ pub fn compute_aggregates(
             message_count: count,
         })
         .collect();
-    hourly_out.sort_by(|a, b| (a.day_of_week, a.hour).cmp(&(b.day_of_week, b.hour)));
+    hourly_out.sort_by_key(|h| (h.day_of_week, h.hour));
 
     AggregatesOutput {
         contact,

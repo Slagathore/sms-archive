@@ -2101,7 +2101,7 @@ fn render_one_insight(ui: &mut egui::Ui, insight: &LoadedInsight) {
     let icon_size = 14.0 + (insight.tier as f32) * 2.5;
     egui::Frame::none()
         .fill(bg)
-        .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))
+        .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_gray(80)))
         .rounding(4.0)
         .inner_margin(8.0)
         .show(ui, |ui| {
@@ -3101,7 +3101,7 @@ fn paint_relationship_growth_chart(
     painter.rect_stroke(
         rect,
         4.0,
-        egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+        egui::Stroke::new(1.0_f32, egui::Color32::from_gray(60)),
     );
 
     // Y-axis labels (top, mid, bottom).
@@ -3121,7 +3121,7 @@ fn paint_relationship_growth_chart(
         );
         painter.line_segment(
             [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
-            egui::Stroke::new(0.5, egui::Color32::from_gray(50)),
+            egui::Stroke::new(0.5_f32, egui::Color32::from_gray(50)),
         );
     }
 
@@ -3155,7 +3155,7 @@ fn paint_relationship_growth_chart(
 
     let draw_series = |pts: &[(f32, f32)], color: egui::Color32| {
         let line: Vec<egui::Pos2> = pts.iter().map(|(x, y)| to_px(*x, *y)).collect();
-        painter.add(egui::Shape::line(line, egui::Stroke::new(1.5, color)));
+        painter.add(egui::Shape::line(line, egui::Stroke::new(1.5_f32, color)));
     };
     draw_series(&total_pts, egui::Color32::from_rgb(180, 180, 220));
     draw_series(&my_pts, egui::Color32::from_rgb(80, 130, 200));
@@ -3182,7 +3182,7 @@ fn paint_relationship_growth_chart(
                 egui::pos2(legend_box.left() + 6.0, y + 6.0),
                 egui::pos2(legend_box.left() + 24.0, y + 6.0),
             ],
-            egui::Stroke::new(2.0, color),
+            egui::Stroke::new(2.0_f32, color),
         );
         painter.text(
             egui::pos2(legend_box.left() + 28.0, y + 2.0),
@@ -3240,7 +3240,7 @@ fn paint_sentiment_chart(ui: &mut egui::Ui, days: &[SentimentDayLoaded], width: 
     painter.rect_stroke(
         rect,
         4.0,
-        egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+        egui::Stroke::new(1.0_f32, egui::Color32::from_gray(60)),
     );
 
     let plot = rect.shrink2(egui::vec2(40.0, 16.0));
@@ -3281,7 +3281,7 @@ fn paint_sentiment_chart(ui: &mut egui::Ui, days: &[SentimentDayLoaded], width: 
             egui::pos2(plot.left(), zero_y),
             egui::pos2(plot.right(), zero_y),
         ],
-        egui::Stroke::new(1.0, egui::Color32::from_gray(80)),
+        egui::Stroke::new(1.0_f32, egui::Color32::from_gray(80)),
     );
     painter.text(
         egui::pos2(rect.left() + 4.0, zero_y),
@@ -3337,13 +3337,13 @@ fn paint_sentiment_chart(ui: &mut egui::Ui, days: &[SentimentDayLoaded], width: 
     if my_pts.len() >= 2 {
         painter.add(egui::Shape::line(
             my_pts,
-            egui::Stroke::new(1.5, egui::Color32::from_rgb(80, 130, 200)),
+            egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(80, 130, 200)),
         ));
     }
     if their_pts.len() >= 2 {
         painter.add(egui::Shape::line(
             their_pts,
-            egui::Stroke::new(1.5, egui::Color32::from_rgb(80, 200, 160)),
+            egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(80, 200, 160)),
         ));
     }
 
@@ -3362,7 +3362,7 @@ fn paint_sentiment_chart(ui: &mut egui::Ui, days: &[SentimentDayLoaded], width: 
             egui::pos2(legend.left() + 6.0, legend.top() + 10.0),
             egui::pos2(legend.left() + 22.0, legend.top() + 10.0),
         ],
-        egui::Stroke::new(2.0, egui::Color32::from_rgb(80, 130, 200)),
+        egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(80, 130, 200)),
     );
     painter.text(
         egui::pos2(legend.left() + 26.0, legend.top() + 6.0),
@@ -3376,7 +3376,7 @@ fn paint_sentiment_chart(ui: &mut egui::Ui, days: &[SentimentDayLoaded], width: 
             egui::pos2(legend.left() + 6.0, legend.top() + 26.0),
             egui::pos2(legend.left() + 22.0, legend.top() + 26.0),
         ],
-        egui::Stroke::new(2.0, egui::Color32::from_rgb(80, 200, 160)),
+        egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(80, 200, 160)),
     );
     painter.text(
         egui::pos2(legend.left() + 26.0, legend.top() + 22.0),
@@ -3761,7 +3761,7 @@ fn paint_sankey(ui: &mut egui::Ui, data: &SankeyData, width: f32, height: f32) {
     painter.rect_stroke(
         rect,
         4.0,
-        egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+        egui::Stroke::new(1.0_f32, egui::Color32::from_gray(60)),
     );
 
     // Group nodes by column.
@@ -3904,7 +3904,7 @@ fn paint_sankey(ui: &mut egui::Ui, data: &SankeyData, width: f32, height: f32) {
     }
 
     // Draw node rectangles + labels on top.
-    for (_, b) in boxes.iter() {
+    for b in boxes.values() {
         painter.rect_filled(b.rect, 2.0, sankey_node_color(b.column));
         // Label sits to the side appropriate for its column.
         let label_anchor = if b.column == 0 {

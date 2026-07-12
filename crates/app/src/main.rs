@@ -2299,7 +2299,7 @@ impl eframe::App for SmsArchiveApp {
                                         egui::Color32::from_rgb(235, 235, 245)
                                     };
                                     let bubble_stroke = if is_anchor {
-                                        egui::Stroke::new(1.5, egui::Color32::from_rgb(0, 120, 215))
+                                        egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(0, 120, 215))
                                     } else {
                                         egui::Stroke::NONE
                                     };
@@ -4317,13 +4317,13 @@ impl eframe::App for SmsArchiveApp {
                                         if let Some(prev) = prev_text {
                                             painter.line_segment(
                                                 [prev, t_pos],
-                                                egui::Stroke::new(1.5, text_color),
+                                                egui::Stroke::new(1.5_f32, text_color),
                                             );
                                         }
                                         if let Some(prev) = prev_media {
                                             painter.line_segment(
                                                 [prev, m_pos],
-                                                egui::Stroke::new(1.5, media_color),
+                                                egui::Stroke::new(1.5_f32, media_color),
                                             );
                                         }
                                         painter.text(
@@ -6219,7 +6219,7 @@ impl SmsArchiveApp {
                 }
             }
         }
-        entries.sort_by(|a, b| b.0.cmp(&a.0));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.0));
         self.log_files = entries.into_iter().map(|(_, path)| path).collect();
         if self.log_selected.is_none() {
             if let Some(path) = self.log_files.first().cloned() {

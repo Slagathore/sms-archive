@@ -11,10 +11,10 @@ pub(crate) fn configure_style(ctx: &egui::Context) {
 
     let mut visuals = egui::Visuals::dark();
     visuals.selection.bg_fill = accent.linear_multiply(0.45);
-    visuals.selection.stroke = Stroke::new(1.0, accent);
+    visuals.selection.stroke = Stroke::new(1.0_f32, accent);
     visuals.hyperlink_color = accent;
-    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, accent_dim);
-    visuals.widgets.active.bg_stroke = Stroke::new(1.5, accent);
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, accent_dim);
+    visuals.widgets.active.bg_stroke = Stroke::new(1.5_f32, accent);
     visuals.panel_fill = Color32::from_gray(24);
     visuals.window_fill = Color32::from_gray(28);
     visuals.extreme_bg_color = Color32::from_gray(16);
