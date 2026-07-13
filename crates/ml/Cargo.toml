@@ -17,6 +17,11 @@ sms-errors = { path = "../errors" }
 # Optional ONNX Runtime
 ort = { workspace = true, optional = true, features = ["ndarray"] }
 
+# CUDA execution provider: only Windows and Linux have ort prebuilt cu12/cu13
+# binaries; macOS has none, so the feature must not be requested there.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+ort = { workspace = true, optional = true, features = ["cuda"] }
+
 [features]
 default = []
 onnx = ["ort", "ndarray", "tokenizers"]

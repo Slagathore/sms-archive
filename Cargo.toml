@@ -106,8 +106,11 @@ libheif-rs = "1.0"
 ffmpeg-next = "7.0"
 nom-exif = "2.6"
 
-# ONNX Runtime
-ort = { version = "2.0.0-rc.2", features = ["cuda"] }
+# ONNX Runtime. The `cuda` feature is added per-crate via a
+# `[target.'cfg(not(target_os = "macos"))'.dependencies]` table (see
+# crates/clip and crates/ml) since ort has no CUDA prebuilt binaries for
+# macOS at all - only Windows and Linux ship cu12/cu13 distributions.
+ort = { version = "2.0.0-rc.2" }
 
 # GUI framework
 egui = "0.25"
