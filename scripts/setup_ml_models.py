@@ -35,12 +35,10 @@ skipped, so re-running after a partial/interrupted run only fetches what's
 missing.
 
 Checksums: see docs/PRIVACY.md ("verify checksum/signature before use").
-Downloaded CLIP1 files are checked against EXPECTED_SHA256 below when a hash
-has been pinned. Nothing is pinned yet (this script was written without
-network access to compute the real upstream hashes) -- on first successful
-run, computed hashes are printed so a maintainer can copy them into
-EXPECTED_SHA256, after which future runs verify integrity instead of
-trusting the download blindly.
+Every downloaded CLIP1 file is verified against a pinned SHA256 in
+EXPECTED_SHA256 below; a mismatch fails the run before the model is used, so
+a tampered or substituted file is rejected rather than trusted. If a file is
+not yet pinned, its computed hash is printed for a maintainer to add.
 """
 
 import hashlib
@@ -98,22 +96,24 @@ CLIP_ONNX_FILES = [
 # already present on disk, so there is nothing external to attest to.
 # ---------------------------------------------------------------------------
 
-# TODO(security): placeholders. This script was authored without network
-# access, so the real upstream SHA256 hashes could not be fetched/verified
-# yet. Run this script with network access once, copy the "sha256=..."
-# values it prints for each CLIP1/* file into this dict, and commit the
-# result -- from then on, every run (on every machine) verifies integrity
-# instead of trusting Hugging Face's transport unconditionally.
+# Pinned SHA256 of every network-downloaded CLIP1 file, from
+# Xenova/clip-vit-large-patch14 on Hugging Face. The two .onnx values are the
+# repo's Git LFS object ids (an LFS oid is the SHA256 of the file content); the
+# seven metadata files are not LFS, so their hashes were computed from the
+# downloaded bytes. verify_checksum() fails the download on any mismatch, so a
+# tampered or substituted model file is rejected before ort loads it. To
+# refresh after an intentional upstream change, re-run the fetch and update
+# these values in the same commit that bumps the model.
 EXPECTED_SHA256: dict[str, Optional[str]] = {
-    "CLIP1/config.json": None,
-    "CLIP1/merges.txt": None,
-    "CLIP1/preprocessor_config.json": None,
-    "CLIP1/special_tokens_map.json": None,
-    "CLIP1/tokenizer.json": None,
-    "CLIP1/tokenizer_config.json": None,
-    "CLIP1/vocab.json": None,
-    "CLIP1/vision_model_fp16.onnx": None,
-    "CLIP1/text_model_fp16.onnx": None,
+    "CLIP1/config.json": "99d2f15ccaf4f72c1e4c656dc77ae0fa487696860617ea50626d3a14a018185d",
+    "CLIP1/merges.txt": "9fd691f7c8039210e0fced15865466c65820d09b63988b0174bfe25de299051a",
+    "CLIP1/preprocessor_config.json": "6f638fb9401a6d6296feff533ee7efe657b787c49f954f82f5906b36ef2a1b1f",
+    "CLIP1/special_tokens_map.json": "c4864a9376a8401918425bed71fc14fc0e81f9b59ec45c1cf96cccb2df508eac",
+    "CLIP1/tokenizer.json": "72ed5c96db5729294468543e4bc75fce14ca63f58e37300290189ba1c1e52b85",
+    "CLIP1/tokenizer_config.json": "60ba2912bc6344c94bc16bbdec27fa1209409167b6f2fdf3cfe9e65462ea3967",
+    "CLIP1/vocab.json": "5047b556ce86ccaf6aa22b3ffccfc52d391ea4accdab9c2f2407da5b742d4363",
+    "CLIP1/vision_model_fp16.onnx": "6e6b9e280b73bdc432b6c3b1c05f33596bbe5570f6825f1174eaa207fc1d22dc",
+    "CLIP1/text_model_fp16.onnx": "643d385d6adbc4b9067f3f94384cc63a8409accb1bfd414496d17df84b161032",
 }
 
 
